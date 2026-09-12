@@ -1,0 +1,83 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/api",
+    "crates/client",
+    "crates/daemon",
+    "crates/cli",
+    "apps/gui/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "LicenseRef-TBD"
+repository = ""
+publish = false
+
+# Shared dependency versions. Members reference these with `{ workspace = true }`.
+[workspace.dependencies]
+# runtime
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "process", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+async-trait = "0.1"
+# serialisation / config
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+toml_edit = "0.25"
+# http
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+# storage
+rusqlite = { version = "0.40", features = ["bundled"] }
+sha2 = "0.11"
+# ipc
+interprocess = { version = "2.4", features = ["tokio"] }
+# cli / logging
+clap = { version = "4.6", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-appender = "0.2"
+# platform
+directories = "6.0"
+keyring = "4.2"
+# errors / ids / time
+thiserror = "2.0"
+anyhow = "1.0"
+uuid = { version = "1.26", features = ["v7", "serde"] }
+time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
+# tests
+wiremock = "0.6"
+insta = { version = "1.48", features = ["json"] }
+assert_cmd = "2.2"
+tempfile = "3.27"
+# internal crates
+apprentice-core = { path = "crates/core" }
+apprentice-api = { path = "crates/api" }
+apprentice-client = { path = "crates/client" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# pedantic lints that are noise for this codebase
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev.package."*"]
+opt-level = 1

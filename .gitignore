@@ -15,3 +15,14 @@ target/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+# apprentice-harness
+apps/gui/node_modules/
+apps/gui/dist/
+apps/gui/src-tauri/gen/
+apps/gui/src-tauri/binaries/
+ml/.venv/
+ml/**/__pycache__/
+ml/.pytest_cache/
+ml/.ruff_cache/
+.harness/
+*.log

@@ -1,0 +1,71 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b6b6b;
+  --border: #e3e3e3;
+  --panel: #f6f6f6;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616;
+    --fg: #e8e8e8;
+    --muted: #9a9a9a;
+    --border: #2c2c2c;
+    --panel: #1f1f1f;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+.shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: 1fr 28px;
+  grid-template-areas: "sidebar main" "status status";
+  height: 100%;
+}
+.sidebar {
+  grid-area: sidebar;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 12px;
+}
+.sidebar h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.main {
+  grid-area: main;
+  padding: 16px;
+}
+.statusbar {
+  grid-area: status;
+  border-top: 1px solid var(--border);
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.muted {
+  color: var(--muted);
+}

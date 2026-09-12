@@ -1,0 +1,19 @@
+[package]
+name = "apprentice-client"
+description = "Daemon discovery, spawning and typed JSON-RPC client for apprentice-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "apprentice_client"
+
+[dependencies]
+apprentice-api = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

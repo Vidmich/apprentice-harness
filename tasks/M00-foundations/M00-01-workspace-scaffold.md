@@ -1,6 +1,6 @@
 # M00-01 — Repository and workspace scaffold
 
-Status: todo
+Status: done
 Depends on: none
 Size: S
 
@@ -73,14 +73,14 @@ now (torch etc. added in M05/M06), dev deps `pytest`, `ruff`. Entry point
 
 ## Acceptance
 
-- [ ] `cargo build --workspace` and `cargo test --workspace` pass on Windows,
+- [x] `cargo build --workspace` and `cargo test --workspace` pass on Windows,
       macOS and Linux (at least Windows verified locally now).
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean.
-- [ ] `pnpm --dir apps/gui install && pnpm --dir apps/gui tauri build` produces
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- [x] `pnpm --dir apps/gui install && pnpm --dir apps/gui tauri build` produces
       a binary; `tauri dev` opens a window titled "apprentice-harness".
-- [ ] `uv run --directory ml apprentice-ml --version` prints the version.
-- [ ] `just lint` and `just test` succeed.
-- [ ] README links to SPEC, ROADMAP and tasks.
+- [x] `uv run --directory ml apprentice-ml --version` prints the version.
+- [x] `just lint` and `just test` succeed.
+- [x] README links to SPEC, ROADMAP and tasks.
 
 ## Verification
 
@@ -92,3 +92,19 @@ Run the commands above. Add a CI-style script `scripts/check.ps1` and
 - Tauri 2 on Windows needs WebView2 (present on Windows 11) and the MSVC
   toolchain; document prerequisites in README (Rust, pnpm, uv, Tauri CLI).
 - Do not add llama.cpp or torch yet; keep the scaffold fast to build.
+
+## Completion notes (2026-09-11)
+
+- Verified on Windows 11 only (Rust 1.98.1, pnpm 12.4, uv 0.12, Node 22).
+  macOS/Linux verification is deferred to CI (M00-12).
+- `pnpm tauri build --no-bundle` verified (release exe opens a window titled
+  "apprentice-harness"); the installer bundle (NSIS/WiX download) was not
+  exercised — it is covered by M00-10's acceptance.
+- The Tauri crate is a member of the Cargo workspace (`apps/gui/src-tauri`)
+  so workspace lints and `cargo clippy --workspace` cover it.
+- TypeScript pinned to 5.x (7.x is the new native port; tooling support was
+  not verified). `@types/node` added for `vite.config.ts`.
+- Placeholder logo source is `apps/gui/app-icon.png`; regenerate icons with
+  `pnpm tauri icon app-icon.png` (mobile icon dirs are deleted afterwards).
+- Toolchain changes made on this machine: `rustup update stable` (1.52 →
+  1.98), `npm install -g pnpm`, `uv tool install rust-just`.
