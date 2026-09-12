@@ -29,6 +29,8 @@ export interface RunState {
   /** Sum of `cost_usd` over the calls that reported one. */
   costUsd?: number;
   status?: AgentStatus;
+  /** Finished `ok` but the model hit `max_tokens`. */
+  truncated?: boolean;
   error?: RpcError;
   startedAt?: number;
   finishedAt?: number;
@@ -116,7 +118,8 @@ export function applyEvent(run: RunState, ev: EventNotification, now: number): R
     }
     case "agent.finished": {
       const done: RunState = { ...next, phase: "done", status: e.status, finishedAt: now };
-      return e.error === undefined ? done : { ...done, error: e.error };
+      const withError = e.error === undefined ? done : { ...done, error: e.error };
+      return e.truncated ? { ...withError, truncated: true } : withError;
     }
     case "permission.request":
       return { ...next, activity: [...next.activity, `? permission: ${e.tool} (${e.risk})`] };

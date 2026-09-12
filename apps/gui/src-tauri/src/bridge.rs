@@ -146,6 +146,7 @@ pub async fn forward(
                 "daemon_unavailable",
                 "connection to daemon closed",
             )),
+            truncated: false,
         },
     });
 }
@@ -188,6 +189,7 @@ mod tests {
             agent_id: agent.into(),
             status,
             error: None,
+            truncated: false,
         }
     }
 
@@ -278,6 +280,7 @@ mod tests {
                 agent_id,
                 status: AgentStatus::Error,
                 error: Some(e),
+                ..
             } => {
                 assert_eq!(agent_id, "agent-1");
                 assert_eq!(e.kind(), Some("daemon_unavailable"));

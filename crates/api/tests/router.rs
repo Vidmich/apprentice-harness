@@ -334,6 +334,7 @@ async fn streaming_method_emits_ordered_events_per_subscription() {
                     agent_id: sub.clone(),
                     status: AgentStatus::Ok,
                     error: None,
+                    truncated: false,
                 },
             )
             .await

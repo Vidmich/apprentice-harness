@@ -28,6 +28,14 @@ pub type EventSink<'a> = dyn FnMut(StreamEvent) + Send + 'a;
 /// A remote model.
 #[async_trait]
 pub trait Mentor: Send + Sync {
+    /// The exact bytes [`Self::complete`] sends for `req`. Serialisation
+    /// is deterministic, so the runtime stores these as the replay unit
+    /// and the wire carries the same bytes.
+    ///
+    /// # Errors
+    /// Serialisation failure (should not happen for well-formed types).
+    fn request_body(&self, req: &MentorRequest) -> Result<Vec<u8>, MentorError>;
+
     /// Streams one completion, calling `on_event` for every delta, and
     /// returns the assembled response.
     ///

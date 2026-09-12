@@ -1,7 +1,8 @@
 //! The daemon's life: serve the local socket (or one stdio connection),
 //! answer `daemon.status` / `daemon.shutdown`, exit on signals or idleness,
-//! and shut down in order — stop accepting, cancel agents, let in-flight
-//! requests answer, flush the trace writer, remove `daemon.json`.
+//! and shut down in order — stop accepting, let in-flight requests
+//! answer, cancel agents and wait for them to record their end, flush the
+//! trace writer, remove `daemon.json`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -92,16 +93,21 @@ impl Server {
         }
     }
 
-    /// No clients for at least `idle`. Running agents count as activity
-    /// once they exist (M00-11).
+    /// No clients and no running agents for at least `idle`.
     fn idle_for(&self, idle: Duration) -> bool {
-        self.connections.load(Ordering::Acquire) == 0
-            && self
-                .idle_since
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .elapsed()
-                >= idle
+        if self.connections.load(Ordering::Acquire) > 0 || self.state.agents().running() > 0 {
+            return false;
+        }
+        let since = *self
+            .idle_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // An agent outliving its connection is activity too.
+        let since = match self.state.agents().last_finished() {
+            Some(t) if t > since => t,
+            _ => since,
+        };
+        since.elapsed() >= idle
     }
 
     fn status(&self) -> Result<DaemonStatusResult, RpcError> {
@@ -288,8 +294,10 @@ async fn accept_loop(
     }
 }
 
-/// The ordered shutdown, after accepting stopped: cancel agents (they share
-/// the token), drain connections, flush traces. A watchdog thread ends the
+/// The ordered shutdown, after accepting stopped: drain connections (the
+/// shutdown token has already cancelled every agent's mentor call; the
+/// `agent.finished` events reach clients still connected), wait for the
+/// agents to record their end, flush traces. A watchdog thread ends the
 /// process at [`HARD_DEADLINE`] no matter what.
 async fn finish(server: &Arc<Server>, tracker: &TaskTracker) -> anyhow::Result<()> {
     let reason = server.reason();
@@ -316,6 +324,7 @@ async fn finish(server: &Arc<Server>, tracker: &TaskTracker) -> anyhow::Result<(
     {
         warn!(timeout = ?DRAIN_TIMEOUT, "connections still open; closing anyway");
     }
+    // Agents are drained (with their own timeout) and the trace flushed.
     server.state.close().await;
     info!(reason, "stopped");
     Ok(())

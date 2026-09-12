@@ -63,10 +63,19 @@ describe("run reducer", () => {
     run = applyEvent(run, ev("a1", 6, finished("a1", "ok")), 5210);
     expect(run.phase).toBe("done");
     expect(run.status).toBe("ok");
+    expect(run.truncated).toBeUndefined();
     expect(run.lastSeq).toBe(6);
     expect(runUsageLine(run, 99_999)).toBe("↳ in 1,204 · out 310 · cache read 0 · $0.0138 · 4.2s");
     // Nothing after the terminal event changes the run.
     expect(applyEvent(run, ev("a1", 7, delta("a1", "late")), 6000)).toBe(run);
+  });
+
+  it("keeps the truncation flag of a finished run", () => {
+    let run = attachRun(startingRun("s1", 0), "a1", "a1");
+    const cut: Event = { type: "agent.finished", agent_id: "a1", status: "ok", truncated: true };
+    run = applyEvent(run, ev("a1", 1, cut), 1);
+    expect(run.status).toBe("ok");
+    expect(run.truncated).toBe(true);
   });
 
   it("omits the cost when no call reported one", () => {

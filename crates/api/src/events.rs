@@ -101,6 +101,10 @@ pub enum Event {
         status: AgentStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<RpcError>,
+        /// The model stopped at `max_tokens`: the answer is incomplete
+        /// although the run finished `ok`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        truncated: bool,
     },
     #[serde(rename = "permission.request")]
     PermissionRequest {
@@ -155,6 +159,7 @@ mod tests {
             agent_id: "ag".into(),
             status: AgentStatus::Error,
             error: Some(RpcError::cancelled()),
+            truncated: false,
         };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["type"], "agent.finished");

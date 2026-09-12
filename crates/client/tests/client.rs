@@ -63,6 +63,7 @@ fn router(token: Option<&str>) -> Router {
                         agent_id: sub.clone(),
                         status: AgentStatus::Ok,
                         error: None,
+                        truncated: false,
                     },
                 )
                 .await

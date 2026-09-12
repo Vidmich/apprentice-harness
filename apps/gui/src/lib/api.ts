@@ -329,7 +329,14 @@ export type KnownEvent =
       blob_id?: string;
     }
   | { type: "agent.usage"; agent_id: string; call_id: string; usage: Usage; cost_usd?: number }
-  | { type: "agent.finished"; agent_id: string; status: AgentStatus; error?: RpcError }
+  | {
+      type: "agent.finished";
+      agent_id: string;
+      status: AgentStatus;
+      error?: RpcError;
+      /** The model stopped at `max_tokens`: the answer is incomplete. */
+      truncated?: boolean;
+    }
   | {
       type: "permission.request";
       request_id: string;
@@ -437,6 +444,7 @@ export function eventShapeError(event: Event): string | undefined {
     case "agent.finished":
       if (!["ok", "cancelled", "error"].includes(String(o.status))) return "bad status";
       if (o.error !== undefined && !isRpcError(o.error)) return "error must be an RpcError";
+      if (o.truncated !== undefined && typeof o.truncated !== "boolean") return "bad truncated";
       return str("agent_id");
     case "permission.request":
       return first(

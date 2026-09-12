@@ -133,6 +133,6 @@ function phaseLabel(tab: Tab): string {
     case "cancelling":
       return "cancelling…";
     case "done":
-      return `status: ${run.status ?? "?"}`;
+      return `status: ${run.status ?? "?"}${run.truncated ? " (output truncated at max_tokens)" : ""}`;
   }
 }

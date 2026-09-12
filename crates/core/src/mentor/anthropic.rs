@@ -116,25 +116,6 @@ impl AnthropicMentor {
             .build()
     }
 
-    /// The exact JSON body sent for `req` (for traces and snapshots).
-    ///
-    /// # Errors
-    /// Serialisation failure (should not happen for well-formed types).
-    pub fn request_body(&self, req: &MentorRequest) -> Result<Vec<u8>, MentorError> {
-        serde_json::to_vec(&WireRequest {
-            model: &req.model,
-            max_tokens: req.max_tokens,
-            stream: true,
-            system: &req.system,
-            messages: &req.messages,
-            tools: &req.tools,
-            thinking: &req.thinking,
-            output_config: OutputConfig { effort: req.effort },
-            metadata: req.metadata.as_ref(),
-        })
-        .map_err(|e| MentorError::Protocol(format!("cannot serialise request: {e}")))
-    }
-
     fn post(&self, path: &str, body: Vec<u8>) -> reqwest::RequestBuilder {
         self.http
             .post(format!("{}{path}", self.base_url))
@@ -256,6 +237,21 @@ impl AnthropicMentor {
 
 #[async_trait]
 impl Mentor for AnthropicMentor {
+    fn request_body(&self, req: &MentorRequest) -> Result<Vec<u8>, MentorError> {
+        serde_json::to_vec(&WireRequest {
+            model: &req.model,
+            max_tokens: req.max_tokens,
+            stream: true,
+            system: &req.system,
+            messages: &req.messages,
+            tools: &req.tools,
+            thinking: &req.thinking,
+            output_config: OutputConfig { effort: req.effort },
+            metadata: req.metadata.as_ref(),
+        })
+        .map_err(|e| MentorError::Protocol(format!("cannot serialise request: {e}")))
+    }
+
     async fn complete(
         &self,
         req: &MentorRequest,

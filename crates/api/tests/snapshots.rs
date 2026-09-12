@@ -188,6 +188,7 @@ fn event_shapes() {
             agent_id: "a1".into(),
             status: AgentStatus::Error,
             error: Some(RpcError::cancelled()),
+            truncated: false,
         },
         Event::PermissionRequest {
             request_id: "p1".into(),

@@ -1,9 +1,11 @@
 //! State shared by everything one daemon process hosts (task M00-08):
 //! paths, the config loader, the trace store and its writer, the secret
-//! store, the lazily built mentor and the shutdown token. RPC handlers are
-//! thin adapters over it; [`AppState::register`] wires all of them.
+//! store, the lazily built mentor, the agent registry and the shutdown
+//! token. RPC handlers are thin adapters over it; [`AppState::register`]
+//! wires all of them.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{SessionCreate, SessionCreateParams, SessionCreateResult};
@@ -12,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ConfigError, ConfigLoader, ConfigService, Paths, secret_store};
 use crate::mentor::{AnthropicMentor, Mentor};
+use crate::runtime::AgentRegistry;
 use crate::secrets::{ChainStore, SecretError, api_key_name};
 use crate::stats::StatsService;
 use crate::trace::{NewSession, SessionStatus, TraceError, TraceService, TraceStore, TraceWriter};
@@ -52,8 +55,14 @@ pub struct AppState {
     writer: TraceWriter,
     secrets: ChainStore,
     mentor: Mutex<Option<Arc<dyn Mentor>>>,
+    agents: AgentRegistry,
     shutdown: CancellationToken,
 }
+
+/// How long [`AppState::close`] waits for cancelled agents to record
+/// their end. Under the daemon's hard deadline (10 s) with its drain of
+/// connections (5 s) accounted for.
+pub const AGENT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -64,6 +73,7 @@ impl std::fmt::Debug for AppState {
                 "mentor_built",
                 &self.mentor.lock().is_ok_and(|m| m.is_some()),
             )
+            .field("agents_running", &self.agents.running())
             .field("shutting_down", &self.shutdown.is_cancelled())
             .finish_non_exhaustive()
     }
@@ -97,6 +107,7 @@ impl AppState {
             writer,
             secrets,
             mentor: Mutex::new(None),
+            agents: AgentRegistry::new(),
             shutdown: CancellationToken::new(),
         }))
     }
@@ -121,9 +132,15 @@ impl AppState {
         &self.secrets
     }
 
-    /// Cancelled when the daemon shuts down; agents (M00-11) watch it.
+    /// Cancelled when the daemon shuts down; every agent's token is a
+    /// child of it.
     pub fn shutdown(&self) -> &CancellationToken {
         &self.shutdown
+    }
+
+    /// The agents running in this process.
+    pub fn agents(&self) -> &AgentRegistry {
+        &self.agents
     }
 
     /// The current user-level config, read fresh (the loader is cheap and
@@ -208,8 +225,9 @@ impl AppState {
     }
 
     /// Registers every core handler: `config.*`, `auth.*`, `session.*`,
-    /// `trace.*`, `stats.*`. `daemon.*` and `agent.*` are the host's.
+    /// `agent.*`, `trace.*`, `stats.*`. `daemon.*` is the host's.
     pub fn register(self: &Arc<Self>, router: &mut Router) {
+        crate::runtime::rpc::register(self, router);
         let state = Arc::clone(self);
         let config = ConfigService::new(self.loader.clone(), self.secrets.clone())
             .with_on_change(move || state.invalidate_mentor());
@@ -227,8 +245,16 @@ impl AppState {
         });
     }
 
-    /// Flushes and stops the trace writer. Call once, at shutdown.
+    /// Cancels the agents, waits for them to record their end, then
+    /// flushes and stops the trace writer. Call once, at shutdown.
     pub async fn close(&self) {
+        self.shutdown.cancel();
+        if !self.agents.drain(AGENT_DRAIN_TIMEOUT).await {
+            tracing::warn!(
+                running = self.agents.running(),
+                "agents still running at shutdown; their end is not recorded"
+            );
+        }
         if let Err(e) = self.writer.flush().await {
             tracing::warn!(error = %e, "trace flush failed at shutdown");
         }
@@ -301,6 +327,9 @@ mod tests {
         assert_eq!(
             names,
             [
+                "agent.cancel",
+                "agent.run",
+                "agent.subscribe",
                 "auth.set_key",
                 "auth.status",
                 "config.get",

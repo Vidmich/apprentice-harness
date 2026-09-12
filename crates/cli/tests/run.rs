@@ -149,6 +149,7 @@ fn fake_daemon(home: &Path) -> (Arc<Mutex<Seen>>, tokio::task::JoinHandle<()>) {
                         agent_id: a,
                         status,
                         error,
+                        truncated: false,
                     };
                     let _ = conn.notify(&sub, finished).await;
                 });

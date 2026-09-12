@@ -86,6 +86,8 @@ struct RunResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_usd: Option<f64>,
     elapsed_s: f64,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<RpcError>,
 }
@@ -148,7 +150,7 @@ async fn stream(
     let mut cost: Option<f64> = None;
     let mut wrote_text = false;
     let mut at_line_start = true;
-    let (status, error) = loop {
+    let (status, error, truncated) = loop {
         let ev = tokio::select! {
             ev = events.next() => ev,
             () = interrupts.recv() => {
@@ -208,7 +210,12 @@ async fn stream(
                     cost = Some(cost.unwrap_or(0.0) + c);
                 }
             }
-            Event::AgentFinished { status, error, .. } => break (status, error),
+            Event::AgentFinished {
+                status,
+                error,
+                truncated,
+                ..
+            } => break (status, error, truncated),
             Event::PermissionRequest { tool, .. } => {
                 out.info(format!(
                     "permission requested for `{tool}` (not supported by the CLI yet)"
@@ -232,6 +239,9 @@ async fn stream(
     }
     let elapsed = started.elapsed().as_secs_f64();
     out.info(usage_line(&usage, cost, elapsed));
+    if truncated {
+        out.info("output truncated: the model hit max_tokens");
+    }
     if let Some(e) = &error
         && !out.json
     {
@@ -251,6 +261,7 @@ async fn stream(
         usage,
         cost_usd: cost,
         elapsed_s: (elapsed * 1000.0).round() / 1000.0,
+        truncated,
         error,
     };
     if out.json {

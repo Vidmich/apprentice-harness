@@ -20,7 +20,8 @@ pub struct StepRef {
 }
 
 impl StepRef {
-    fn event(&self, kind: &str) -> NewEvent {
+    /// A new event of `kind` at this step.
+    pub fn event(&self, kind: &str) -> NewEvent {
         NewEvent::new(self.session.clone(), kind)
             .agent(self.agent.clone())
             .step(self.step.clone())

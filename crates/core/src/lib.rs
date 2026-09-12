@@ -7,6 +7,7 @@
 pub mod app;
 pub mod config;
 pub mod mentor;
+pub mod runtime;
 pub mod secrets;
 pub mod stats;
 pub mod trace;
