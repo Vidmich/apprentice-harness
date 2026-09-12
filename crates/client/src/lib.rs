@@ -2,15 +2,17 @@
 //!
 //! [`DaemonClient`] speaks the `apprentice-api` protocol over any
 //! `AsyncRead`/`AsyncWrite` pair: request/response with typed methods,
-//! and per-subscription event streams. [`discovery`] reads `daemon.json`;
-//! connecting by discovery and spawning the daemon arrive with M00-08.
+//! and per-subscription event streams. [`discovery`] reads and writes
+//! `daemon.json`; [`DaemonClient::connect`] finds the daemon through it and
+//! spawns `harnessd` when nothing answers.
 
+pub mod connect;
 pub mod discovery;
 
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -25,6 +27,7 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::{debug, warn};
 
+pub use connect::{ConnectError, ConnectOptions, Connected, DAEMON_PATH_ENV};
 pub use discovery::{DAEMON_INFO_FILE, DaemonInfo, DiscoveryError};
 
 /// Crate version.
@@ -83,9 +86,28 @@ struct Inner {
     next_id: AtomicU64,
     closed: AtomicBool,
     options: ClientOptions,
+    /// The reader task, stopped when the last handle goes away.
+    reader: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
 }
 
-/// A connection to the daemon. Cheap to clone; all clones share the socket.
+impl Drop for Inner {
+    /// The last [`DaemonClient`] clone is gone: stop reading and let the
+    /// writer finish, which closes the transport so the daemon sees EOF
+    /// (and a `--stdio` daemon exits).
+    fn drop(&mut self) {
+        if let Some(reader) = self
+            .reader
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            reader.abort();
+        }
+    }
+}
+
+/// A connection to the daemon. Cheap to clone; all clones share the
+/// socket, which closes when the last one is dropped.
 #[derive(Clone)]
 pub struct DaemonClient {
     inner: Arc<Inner>,
@@ -116,6 +138,7 @@ impl DaemonClient {
             next_id: AtomicU64::new(1),
             closed: AtomicBool::new(false),
             options,
+            reader: std::sync::Mutex::new(None),
         });
 
         let mut writer = writer;
@@ -128,12 +151,17 @@ impl DaemonClient {
             }
         });
 
-        let reader_inner = Arc::clone(&inner);
-        tokio::spawn(async move {
+        // The reader holds only a weak reference so that dropping every
+        // client handle (not the daemon closing) also ends the connection.
+        let weak: Weak<Inner> = Arc::downgrade(&inner);
+        let reader_task = tokio::spawn(async move {
             let mut reader = BufReader::new(reader);
             loop {
                 match read_frame(&mut reader).await {
-                    Ok(Frame::Line(line)) => reader_inner.handle_line(&line).await,
+                    Ok(Frame::Line(line)) => {
+                        let Some(inner) = weak.upgrade() else { break };
+                        inner.handle_line(&line).await;
+                    }
                     Ok(Frame::TooLong { bytes_discarded }) => {
                         warn!(bytes_discarded, "daemon sent an oversized line; skipped");
                     }
@@ -144,8 +172,14 @@ impl DaemonClient {
                     }
                 }
             }
-            reader_inner.close().await;
+            if let Some(inner) = weak.upgrade() {
+                inner.close().await;
+            }
         });
+        *inner
+            .reader
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(reader_task.abort_handle());
 
         Self { inner }
     }

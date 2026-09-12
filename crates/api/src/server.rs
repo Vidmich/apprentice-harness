@@ -20,7 +20,9 @@ use crate::API_VERSION;
 use crate::codec::{Frame, read_frame, write_message};
 use crate::events::{EVENT_METHOD, Event, EventNotification};
 use crate::jsonrpc::{Id, Message, Notification, Request, Response, RpcError};
-use crate::methods::{DaemonHello, HelloParams, HelloResult, Method};
+use crate::methods::{
+    DaemonHello, DaemonShutdown, HelloParams, HelloResult, Method, ShutdownParams,
+};
 
 /// Static facts the router reports in the handshake.
 #[derive(Debug, Clone)]
@@ -37,6 +39,7 @@ type Handler = Arc<dyn Fn(Arc<Connection>, Value) -> HandlerFuture + Send + Sync
 /// Maps method names to handlers and runs connections.
 pub struct Router {
     config: RouterConfig,
+    api_version: u32,
     handlers: HashMap<&'static str, Handler>,
     next_conn_id: AtomicU64,
 }
@@ -121,9 +124,19 @@ impl Router {
     pub fn new(config: RouterConfig) -> Self {
         Self {
             config,
+            api_version: API_VERSION,
             handlers: HashMap::new(),
             next_conn_id: AtomicU64::new(1),
         }
+    }
+
+    /// Pretends to speak API `version` instead of [`API_VERSION`]: the
+    /// handshake rejects clients of any other version. Only compatibility
+    /// tests (an "older daemon") want this.
+    #[must_use]
+    pub fn with_api_version(mut self, version: u32) -> Self {
+        self.api_version = version;
+        self
     }
 
     /// Registers a typed handler for `M`. Registering the same method twice
@@ -168,6 +181,28 @@ impl Router {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        self.serve_with_shutdown(reader, writer, std::future::pending())
+            .await
+    }
+
+    /// Like [`Router::serve`], but also stops when `shutdown` resolves:
+    /// no further requests are read, handlers already running finish and
+    /// their responses are written, then the connection is closed. This is
+    /// what lets a `daemon.shutdown` reply reach its caller.
+    ///
+    /// # Errors
+    /// Returns [`ServeError::Io`] on transport failure.
+    pub async fn serve_with_shutdown<R, W, S>(
+        self: Arc<Self>,
+        reader: R,
+        writer: W,
+        shutdown: S,
+    ) -> Result<(), ServeError>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+        S: Future<Output = ()> + Send,
+    {
         let (tx, mut rx) = mpsc::channel::<Message>(4096);
         let conn = Arc::new(Connection {
             id: self.next_conn_id.fetch_add(1, Ordering::Relaxed),
@@ -190,8 +225,15 @@ impl Router {
 
         let mut reader = BufReader::new(reader);
         let mut tasks: JoinSet<()> = JoinSet::new();
+        let mut shutdown = std::pin::pin!(shutdown);
         let result = loop {
             tokio::select! {
+                () = &mut shutdown => {
+                    debug!(conn = conn.id, "closing connection: shutdown");
+                    // Let in-flight handlers answer before the writer goes.
+                    while tasks.join_next().await.is_some() {}
+                    break Ok(());
+                }
                 frame = read_frame(&mut reader) => match frame {
                     Ok(Frame::Line(line)) => self.handle_line(&conn, &line, &mut tasks).await,
                     Ok(Frame::TooLong { bytes_discarded }) => {
@@ -281,7 +323,7 @@ impl Router {
             conn.respond(response).await;
             return;
         }
-        if !conn.is_authenticated() {
+        if !conn.is_authenticated() && !self.shutdown_token_ok(&method, &params) {
             conn.respond(Response::failure(
                 Some(id),
                 RpcError::unauthorized("send daemon.hello before any other method"),
@@ -326,11 +368,28 @@ impl Router {
         });
     }
 
+    /// `daemon.shutdown` may skip the handshake when it carries the daemon
+    /// token: a client whose `daemon.hello` failed with `incompatible_api`
+    /// uses this to replace an older daemon. Without a token configured
+    /// (stdio mode) no proof is possible and the handshake stays required.
+    fn shutdown_token_ok(&self, method: &str, params: &Value) -> bool {
+        if method != DaemonShutdown::NAME {
+            return false;
+        }
+        let Some(expected) = &self.config.token else {
+            return false;
+        };
+        let Ok(p) = serde_json::from_value::<ShutdownParams>(params.clone()) else {
+            return false;
+        };
+        p.token.as_deref() == Some(expected.as_str())
+    }
+
     async fn hello(&self, conn: &Arc<Connection>, params: Value) -> Result<Value, RpcError> {
         let p: HelloParams = serde_json::from_value(params)
             .map_err(|e| RpcError::invalid_params(format!("daemon.hello: {e}")))?;
-        if p.api_version != API_VERSION {
-            return Err(RpcError::incompatible_api(p.api_version, API_VERSION));
+        if p.api_version != self.api_version {
+            return Err(RpcError::incompatible_api(p.api_version, self.api_version));
         }
         if let Some(expected) = &self.config.token
             && p.token.as_deref() != Some(expected.as_str())
@@ -342,7 +401,7 @@ impl Router {
         debug!(conn = conn.id, client = p.client, "handshake ok");
         let result = HelloResult {
             daemon_version: self.config.daemon_version.clone(),
-            api_version: API_VERSION,
+            api_version: self.api_version,
             pid: self.config.pid,
         };
         Ok(serde_json::to_value(result).unwrap())

@@ -4,6 +4,7 @@
 //! Hosted by the `harnessd` daemon. Clients talk to it through the
 //! `apprentice-api` protocol; they never link this crate.
 
+pub mod app;
 pub mod config;
 pub mod mentor;
 pub mod secrets;

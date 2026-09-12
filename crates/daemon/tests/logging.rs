@@ -1,5 +1,6 @@
 //! `harnessd` initialises logging from flags, environment and config
-//! (task M00-04). Lifecycle itself is M00-08.
+//! (task M00-04). Each run serves `--stdio` on a closed stdin, so the
+//! daemon starts fully and exits at once; lifecycle is in `lifecycle.rs`.
 
 use std::path::Path;
 
@@ -41,6 +42,8 @@ fn writes_json_log_with_flag_over_env_over_config() {
         .unwrap()
         .arg("--home")
         .arg(home.path())
+        .arg("--stdio")
+        .write_stdin("")
         .env_remove("HARNESS_LOG_LEVEL")
         .env_remove("RUST_LOG")
         .assert()
@@ -48,13 +51,15 @@ fn writes_json_log_with_flag_over_env_over_config() {
     let text = daemon_log(home.path());
     let lines = json_lines(&text);
     assert!(lines.iter().all(|l| l["level"] == "WARN"), "{text}");
-    assert!(text.contains("lifecycle not implemented"), "{text}");
+    assert!(!text.contains("starting"), "{text}");
 
     // env beats config.
     Command::cargo_bin("harnessd")
         .unwrap()
         .arg("--home")
         .arg(home.path())
+        .arg("--stdio")
+        .write_stdin("")
         .env("HARNESS_LOG_LEVEL", "info")
         .env_remove("RUST_LOG")
         .assert()
@@ -81,7 +86,9 @@ fn writes_json_log_with_flag_over_env_over_config() {
             home.path().to_str().unwrap(),
             "--log-level",
             "trace",
+            "--stdio",
         ])
+        .write_stdin("")
         .env("HARNESS_LOG_LEVEL", "warn")
         .env_remove("RUST_LOG")
         .assert()
@@ -105,7 +112,8 @@ fn broken_config_still_logs_and_reports() {
         .unwrap()
         .arg("--home")
         .arg(home.path())
-        .arg("--foreground")
+        .arg("--stdio")
+        .write_stdin("")
         .env_remove("HARNESS_LOG_LEVEL")
         .assert()
         .success()

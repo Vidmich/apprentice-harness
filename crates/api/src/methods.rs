@@ -84,6 +84,20 @@ method!(DaemonStatus, "daemon.status", Empty, DaemonStatusResult);
 pub struct ShutdownParams {
     #[serde(default = "default_true")]
     pub graceful: bool,
+    /// The daemon token. Lets a client that failed `daemon.hello` with
+    /// `incompatible_api` still ask an older daemon to stop, so it can be
+    /// replaced; ignored on an authenticated connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
+impl Default for ShutdownParams {
+    fn default() -> Self {
+        Self {
+            graceful: true,
+            token: None,
+        }
+    }
 }
 
 fn default_true() -> bool {

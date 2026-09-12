@@ -17,16 +17,48 @@ use crate::secrets::{ChainStore, SecretError, SecretStore, api_key_name};
 /// Providers whose keys `auth.*` manages.
 pub const PROVIDERS: &[&str] = &["anthropic"];
 
+type ChangeHook = Arc<dyn Fn() + Send + Sync>;
+
 /// Handlers for `config.get|set|path` and `auth.set_key|status`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConfigService {
     loader: ConfigLoader,
     secrets: ChainStore,
+    on_change: Option<ChangeHook>,
+}
+
+impl std::fmt::Debug for ConfigService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigService")
+            .field("loader", &self.loader)
+            .field("secrets", &self.secrets)
+            .field("on_change", &self.on_change.is_some())
+            .finish()
+    }
 }
 
 impl ConfigService {
     pub fn new(loader: ConfigLoader, secrets: ChainStore) -> Self {
-        Self { loader, secrets }
+        Self {
+            loader,
+            secrets,
+            on_change: None,
+        }
+    }
+
+    /// Called after every successful `config.set` or `auth.set_key`, so
+    /// the host can drop anything derived from the old values (the daemon
+    /// rebuilds its mentor on next use).
+    #[must_use]
+    pub fn with_on_change(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_change = Some(Arc::new(hook));
+        self
+    }
+
+    fn changed(&self) {
+        if let Some(hook) = &self.on_change {
+            hook();
+        }
     }
 
     pub fn loader(&self) -> &ConfigLoader {
@@ -65,6 +97,7 @@ impl ConfigService {
             &p.key,
             p.value,
         )?;
+        self.changed();
         Ok(Empty {})
     }
 
@@ -94,6 +127,7 @@ impl ConfigService {
         self.secrets
             .set(&api_key_name(&p.provider), &key.to_owned().into())
             .map_err(|e| secret_error(&e))?;
+        self.changed();
         Ok(Empty {})
     }
 

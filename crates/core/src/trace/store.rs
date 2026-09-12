@@ -511,6 +511,16 @@ impl TraceStore {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Number of sessions with `status`.
+    pub fn count_sessions(&self, status: SessionStatus) -> Result<u64> {
+        let n: i64 = self.lock().query_row(
+            "SELECT COUNT(*) FROM sessions WHERE status = ?1",
+            params![status.as_str()],
+            |r| r.get(0),
+        )?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
     pub fn set_session_status(&self, id: &SessionId, status: SessionStatus) -> Result<()> {
         let n = self.lock().execute(
             "UPDATE sessions SET status = ?2, updated_at = ?3 WHERE id = ?1",

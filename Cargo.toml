@@ -20,7 +20,7 @@ publish = false
 # Shared dependency versions. Members reference these with `{ workspace = true }`.
 [workspace.dependencies]
 # runtime
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net", "process", "signal", "fs"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "net", "process", "signal", "fs"] }
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 bytes = "1.10"
 futures = "0.3"
@@ -49,7 +49,8 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "d
 # errors / ids / time
 thiserror = "2.0"
 anyhow = "1.0"
-uuid = { version = "1.26", features = ["v7", "serde"] }
+uuid = { version = "1.26", features = ["v4", "v7", "serde"] }
+fs4 = "1.1"
 time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"] }
 # tests
 wiremock = "0.6"

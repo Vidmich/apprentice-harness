@@ -10,8 +10,8 @@ use apprentice_api::codec::MAX_LINE_BYTES;
 use apprentice_api::events::{AgentStatus, Event};
 use apprentice_api::jsonrpc::{RpcError, codes};
 use apprentice_api::methods::{
-    AgentIdParams, AgentRun, AgentRunParams, AgentRunResult, DaemonStatus, DaemonStatusResult,
-    Empty, Method,
+    AgentIdParams, AgentRun, AgentRunParams, AgentRunResult, DaemonShutdown, DaemonStatus,
+    DaemonStatusResult, Empty, Method, ShutdownParams,
 };
 use apprentice_api::server::{Connection, Router, RouterConfig};
 use serde_json::{Value, json};
@@ -124,6 +124,90 @@ async fn hello_checks_token_and_api_version() {
 
     let status = c.request(2, "daemon.status", json!(null)).await;
     assert_eq!(status["result"]["version"], "9.9.9");
+}
+
+#[tokio::test]
+async fn shutdown_with_the_token_skips_the_handshake() {
+    let mut r = router(Some("secret"));
+    r.add::<DaemonShutdown, _, _>(|_conn, _p: ShutdownParams| async { Ok(Empty {}) });
+    let mut c = start(r);
+
+    // No token, wrong token: still unauthorized.
+    let resp = c.request(1, "daemon.shutdown", json!({})).await;
+    assert_eq!(resp["error"]["code"], codes::UNAUTHORIZED);
+    let resp = c
+        .request(2, "daemon.shutdown", json!({"token": "nope"}))
+        .await;
+    assert_eq!(resp["error"]["code"], codes::UNAUTHORIZED);
+    // The token alone is enough for this one method...
+    let resp = c
+        .request(3, "daemon.shutdown", json!({"token": "secret"}))
+        .await;
+    assert_eq!(resp["result"], json!({}), "{resp}");
+    // ...and authorises nothing else.
+    let resp = c.request(4, "daemon.status", json!({})).await;
+    assert_eq!(resp["error"]["code"], codes::UNAUTHORIZED);
+
+    // A daemon without a token (stdio mode) cannot be proven to; hello first.
+    let mut r = router(None);
+    r.add::<DaemonShutdown, _, _>(|_conn, _p: ShutdownParams| async { Ok(Empty {}) });
+    let mut c = start(r);
+    let resp = c.request(1, "daemon.shutdown", json!({})).await;
+    assert_eq!(resp["error"]["code"], codes::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn older_daemon_rejects_the_handshake_with_both_versions() {
+    let mut c = start(router(None).with_api_version(API_VERSION + 7));
+    let resp = c.hello(None).await;
+    assert_eq!(resp["error"]["code"], codes::INCOMPATIBLE_API);
+    assert_eq!(resp["error"]["data"]["details"]["client_api"], API_VERSION);
+    assert_eq!(
+        resp["error"]["data"]["details"]["daemon_api"],
+        API_VERSION + 7
+    );
+}
+
+#[tokio::test]
+async fn shutdown_lets_in_flight_handlers_answer_then_closes() {
+    let mut r = router(None);
+    // Slow handler: 200 ms.
+    r.add::<apprentice_api::methods::AgentCancel, _, _>(|_conn, _p: AgentIdParams| async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        Ok(Empty {})
+    });
+    let (server_side, client_side) = tokio::io::duplex(1 << 20);
+    let (sr, sw) = tokio::io::split(server_side);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let served = tokio::spawn(async move {
+        Arc::new(r)
+            .serve_with_shutdown(sr, sw, async {
+                let _ = stop_rx.await;
+            })
+            .await
+    });
+    let (cr, cw) = tokio::io::split(client_side);
+    let mut c = RawClient {
+        reader: BufReader::new(cr),
+        writer: cw,
+    };
+    c.hello(None).await;
+    c.send(
+        &json!({"jsonrpc":"2.0","id":9,"method":"agent.cancel","params":{"agent_id":"x"}})
+            .to_string(),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    stop_tx.send(()).unwrap();
+    // The slow handler's answer still arrives...
+    let resp = c.recv().await;
+    assert_eq!(resp["id"], 9);
+    assert_eq!(resp["result"], json!({}));
+    // ...then the server closes the connection.
+    let mut line = String::new();
+    let n = c.reader.read_line(&mut line).await.unwrap();
+    assert_eq!(n, 0, "expected EOF, got {line:?}");
+    served.await.unwrap().unwrap();
 }
 
 #[tokio::test]

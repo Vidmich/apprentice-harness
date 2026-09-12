@@ -111,6 +111,23 @@ async fn hello_then_typed_call() {
 }
 
 #[tokio::test]
+async fn dropping_the_last_handle_closes_the_connection() {
+    let (client, server) = start(router(None), ClientOptions::default());
+    client.hello("t", "0", None).await.unwrap();
+    let other = client.clone();
+    drop(client);
+    // One handle still alive: the daemon keeps serving.
+    other.call::<DaemonStatus>(Empty {}).await.unwrap();
+    assert!(!server.is_finished());
+    drop(other);
+    // None left: the daemon sees EOF and its serve() returns.
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .expect("server did not observe the close")
+        .unwrap();
+}
+
+#[tokio::test]
 async fn concurrent_calls_are_matched_by_id() {
     let (client, _server) = start(router(None), ClientOptions::default());
     client.hello("t", "0", None).await.unwrap();

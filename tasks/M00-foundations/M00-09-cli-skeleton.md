@@ -97,3 +97,13 @@ temp `HARNESS_HOME` and a mock mentor (`HARNESS_MENTOR_BASE_URL` pointing to
 
 - Keep command names stable; SPEC §14 names are the contract. Aliases are
   fine (`harness s` for `session`) but not required now.
+- M00-08 shipped `DaemonClient::connect(&ConnectOptions)` (discovery, spawn,
+  older-daemon replacement) and `crates/cli/src/daemon.rs::with_client`
+  already uses it with `spawn_if_missing(false)`; `--no-spawn` maps onto
+  that flag, `--home` onto `ConnectOptions::home` (only pass it when the
+  user gave `--home`; platform paths must not be turned into `--home`).
+  `ConnectError::NotRunning` / `Incompatible` are the exit-3 / exit-4 cases.
+  `harness daemon start` = connect with spawning on, print pid/endpoint from
+  `Connected`; `stop` = `daemon.shutdown` then poll `DaemonInfo::read` until
+  absent; `run` = exec `harnessd --foreground` (locate via
+  `apprentice_client::connect::locate_daemon`).

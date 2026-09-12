@@ -14,15 +14,25 @@ path = "src/main.rs"
 [dependencies]
 apprentice-core = { workspace = true }
 apprentice-api = { workspace = true }
+apprentice-client = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+fs4 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+# Only to send CTRL_BREAK to a spawned daemon in the lifecycle tests.
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true

@@ -100,6 +100,17 @@ connection drop does NOT cancel the agent (the CLI's CTRL-C cancels
 explicitly; the GUI may reattach — `agent.subscribe {agent_id}` method added
 here for reattachment, replaying nothing, just future events).
 
+M00-08 shipped `apprentice_core::app::AppState` (loader, store, writer,
+secrets, `mentor()`, `shutdown()` token, `register(router)`); add the
+`AgentRegistry` to it and register `agent.*` there. Each agent's
+`CancellationToken` must be a child of `state.shutdown()` so
+`daemon.shutdown` / signals cancel it; the daemon's `finish` should then
+wait for the registry to drain (before the trace flush) and the idle timer
+should treat running agents as activity (`Server::idle_for` in
+`crates/daemon/src/lifecycle.rs`). The M00-08 acceptance item "graceful
+shutdown with an in-flight mentor call records `agent.finished{cancelled}`
+and flushes queued events" is tested here.
+
 ## Acceptance
 
 - [ ] E2E test (`crates/daemon/tests/e2e_hello.rs`): start daemon with temp
