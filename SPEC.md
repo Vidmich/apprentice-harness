@@ -167,18 +167,53 @@ With the apprentice, each stage gets a hook:
 
 Every hook is optional, has a latency budget, and falls through cleanly.
 
+**Primary shape: the observer.** The apprentice is a long-lived per-session
+process that consumes the session's event stream continuously (user
+messages, mentor output, tool results) and keeps its understanding of the
+task in its model state (recurrent state, or KV cache for a transformer).
+The hooks above are then *queries against that state* — "what does the
+mentor need for this step", "compress this result given what you know",
+"emit the current `#state`" — rather than fresh invocations with re-assembled
+prompts. Exact data is never expected to be in the state: it lives in the
+trace store and the workspace and is fetched by tools or referenced by id.
+
+**Fallback shape: stateless roles.** Each hook is a standalone call with an
+explicitly assembled prompt. Used when the observer cannot be kept resident
+(memory pressure, model without cheap state, cold start) and as the A/B
+baseline for the observer itself. Both shapes implement the same hooks and
+produce the same protocol blocks, so the orchestrator does not care which is
+active.
+
 ## 5. Apprentice roles
 
 Each role is specified by: input, output, success criterion, latency budget,
 fallback, and how it is evaluated. Roles start as prompts and become trained
 artifacts once data exists.
 
+### 5.0 Observer (primary shape, §4)
+- **Input:** the session event stream, appended as it happens.
+- **Output:** none by itself; it is the state the other roles query. Answers
+  `#state` on demand (goal, decisions, files touched, open problems, what was
+  tried) directly from its state — the compactor (5.3) is then a query, not a
+  re-read of the transcript.
+- **Success:** the roles built on it match or beat their stateless versions
+  on the replay evaluator, at lower local cost per step.
+- **State discipline:** state is snapshotted into the trace at every step
+  (cheap for recurrent models: tens of MB; for a transformer the snapshot is
+  the KV cache and may be sampled instead) so any step can be replayed
+  exactly and a sub-agent can be forked from the parent's state.
+- **Fallback:** stateless roles (§4).
+
 ### 5.1 Output compressor
 - **Input:** a tool result (file content, grep output, test log, diff, shell
   output) plus the current task summary.
 - **Output:** a shorter representation that preserves what the mentor needs
   (errors with locations, signatures, changed regions, exact line numbers,
-  exact strings that may be needed for edits).
+  exact strings that may be needed for edits). **References before copies:**
+  the default output points into the raw blob (`blob:<id> L120–134`,
+  `err:E0308 @ src/x.rs:42`) and the harness expands references it decides
+  the mentor needs verbatim; the model only has to *locate*, which keeps
+  precision demands low and hallucinated strings out of the channel.
 - **Success:** the mentor's next action is unchanged compared with the full
   result (replay-equivalence, §12.3).
 - **Fallback:** send the raw result (optionally with a mechanical truncation).
@@ -241,6 +276,12 @@ Wire format principles:
   `#need`). Exact strings and line numbers are never paraphrased.
 - Stable prefix layout so prompt caching is effective: tools, then frozen
   system text, then compacted state, then the volatile tail.
+- **Append-only prompts.** Both the mentor's prompt cache and the local KV
+  cache are invalidated from the first changed token onwards. Roles therefore
+  only ever *append* or *replace a suffix*: compaction replaces the tail of
+  the history with a summary block, never edits earlier turns; system text is
+  frozen for the life of a session. A change that touches the prefix must be
+  justified by a measured saving larger than the cache rebuild it causes.
 - The mentor can issue apprentice-directed requests (`#ask-apprentice`) that
   are handled locally and never appear as separate remote calls.
 - At the end of a step, the mentor may be asked (cheaply, in the same call
@@ -259,6 +300,23 @@ coding":
   with CUDA/Metal/Vulkan/CPU backends selected by the model manager.
 - Continuous batching with multiple sequence slots; per-agent KV-cache reuse
   where possible; prompt-prefix caching for role prompts.
+- **KV cache is the session state and the scarce resource.** A transformer
+  does not re-read its context per token; the KV cache (keys/values for every
+  token seen, per layer) is what makes an agent's context incremental. Design
+  consequences:
+  - VRAM budget = weights + Σ slots × context × per-token KV size; slot count
+    and per-slot context are configured per machine and reported by the bench.
+  - Prefix sharing across slots for the common role prompts; slot
+    save/restore to disk so a parked session resumes without re-prefilling.
+  - Prompts are append-only (§6) so the cache survives across steps.
+- **Architecture-agnostic session state.** The service exposes an opaque
+  `SessionState` handle with `append(tokens)`, `generate(query, params)`,
+  `snapshot() -> bytes`, `restore(bytes)`, `fork()`, `drop()`. A KV-cache
+  backend and a recurrent-state backend both implement it; the observer
+  (§4, §5.0) and the orchestrator are written against the handle only.
+  Recurrent backends cannot rewind to an arbitrary prefix — only to a
+  snapshot — so the orchestrator treats snapshots, not prefixes, as the unit
+  of rollback.
 - Priority queue: interactive roles (compressor on the critical path) before
   background roles (feedback labelling, idle-time work).
 - **Latency budgets per role** and a **bypass rule**: if a request cannot be
@@ -288,6 +346,19 @@ Criteria:
 Initial candidates: Qwen2.5-Coder (1.5B/3B/7B) and Qwen3 text-only (4B/8B).
 The choice is made empirically in the eval engine; the model manifest supports
 several models side by side and per-role assignment.
+
+**Recurrent / state-space / hybrid architectures** (RWKV-7, Mamba-family,
+Qwen3-Next-class hybrids with linear attention) are a second candidate
+family. They hold the conversation in a fixed-size state instead of a growing
+KV cache, so per-token cost and memory are constant and the input stream can
+in principle be unbounded. The state is lossy by construction; the apprentice
+design tolerates this because exact data (file contents, identifiers, line
+numbers) always lives in external memory reached through tools, and the
+in-model state only has to carry the high-level understanding of the task.
+They are benchmarked in the eval engine against the transformer candidates on
+the same role suite; the trade-off to measure is recall of precise references
+versus constant-cost long sessions. Ecosystem maturity (llama.cpp support,
+fine-tuning tooling, coding quality) is a selection criterion.
 
 Why fine-tune rather than train from scratch: the apprentice's value comes from
 understanding code, which pretraining provides at a cost of ~10⁵–10⁶ GPU-hours
@@ -391,6 +462,13 @@ compare with the original action: exact match for tool calls/edits, judge for
 text. Reports sufficiency rate per role and token delta per role. Runs in
 minutes, not hours, and gates every prompt/model change.
 
+For the observer shape (§5.0) the apprentice side of a replay restores the
+state snapshot recorded at that step, so a role's output is reproduced from
+exactly the state it had — no re-ingestion of the transcript. The evaluator
+also reports a **precise-reference recall** metric (does the role point at
+the right blob/line/identifier?) alongside sufficiency, because that is the
+axis on which recurrent models are expected to differ from transformers.
+
 ### 12.4 Full A/B runs
 Same corpus, remote-only vs remote+apprentice (and between apprentice
 versions), several seeds, reported as `harness bench` output with confidence
@@ -458,7 +536,12 @@ harness daemon start|stop|status
 
 - Licence.
 - API budget for teacher-data generation (decided at Milestone 5/6).
-- Exact base model and quantization (decided empirically in Milestone 4).
+- Exact base model and quantization (decided empirically in Milestone 4),
+  including whether a recurrent/hybrid model (§8) replaces or complements the
+  transformer apprentice.
+- (Decided 2026-09-12: the apprentice runs as a long-lived per-session
+  *observer* with state carried in KV cache or recurrent state; stateless
+  per-role calls are the fallback and the A/B baseline. See §4, §5.0, §7.)
 - Whether server-side compaction/context-editing from the API is used as a
   baseline or complement to the local compactor.
 - Vision role.

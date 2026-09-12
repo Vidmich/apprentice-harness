@@ -9,8 +9,9 @@ and exit criterion: `../../ROADMAP.md`. Spec: `SPEC.md` §4 (hook points),
 | Id | Title | One-line goal |
 |---|---|---|
 | M03-01 | Protocol v1 artifact | `protocol/v1/`: mentor system-prompt *addendum* (separate from the M01-09 baseline so A/B stays possible), apprentice role prompts, wire-format spec (`#ctx`, `#result`, `#state`, `#need`, `expand <id>`, `#ask-apprentice`), CHANGELOG; `protocol_version` recorded in every `mentor.request` payload. |
-| M03-02 | Apprentice orchestrator | Implements the `StepHooks` trait from M01-08: decides per step which roles run, enforces latency budgets via the inference service (M02-04/05), merges outputs into the request, records `apprentice.invocation` events with token deltas and bypass reasons; `--no-apprentice` / config toggle. |
-| M03-03 | Role: output compressor | Prompted compression of tool results (shell, grep, read_file, diff) with type-specific prompts; keeps exact strings/line numbers; raw blob stays retrievable by id; replaces the M01-01 head/tail truncation when enabled. |
+| M03-02 | Apprentice orchestrator | Implements the `StepHooks` trait from M01-08: decides per step which roles run, enforces latency budgets via the inference service (M02-04/05), merges outputs into the request, records `apprentice.invocation` events with token deltas and bypass reasons; `--no-apprentice` / config toggle. Two role backends behind one interface: **observer** (primary, M03-02b) and **stateless** (fallback and A/B baseline); the active backend is recorded per invocation. |
+| M03-02b | Observer | Per-session resident `SessionState` (M02-04b) fed with every session event as it is appended to the trace (user text, mentor output, tool results — raw or by reference); roles are queries against it; `#state` answered from state; snapshot per step into the trace; fork on sub-agent spawn; automatic demotion to the stateless backend on eviction or error with a trace record. |
+| M03-03 | Role: output compressor | Prompted compression of tool results (shell, grep, read_file, diff) with type-specific prompts; **references-first** output (`blob:<id> L..`, `err:.. @ path:line`) expanded by the harness where verbatim text is needed, copies only on `#need raw`; raw blob stays retrievable by id; replaces the M01-01 head/tail truncation when enabled. |
 | M03-04 | `expand` by reference | Mentor tool `expand {result_id, range?}` returning the raw result (or a slice) from the trace blob; counts as a "regret" signal for the compressor when used. |
 | M03-05 | Repository index | Tree-sitter based symbol index (functions, types, imports) and chunking per file; incremental refresh from the workspace index (M01-02); query API used by the selector and later by the ranker (M06). |
 | M03-06 | Role: context selector | Prompted selection: given task + state + candidate chunks from the index, produce a ranked, budgeted `#ctx` block injected before the mentor call; ablation-friendly output (chunk ids kept in the trace). |
@@ -38,7 +39,16 @@ and exit criterion: `../../ROADMAP.md`. Spec: `SPEC.md` §4 (hook points),
 ## Decisions to make at start
 
 - Which roles run by default on day one (recommendation: compressor only,
-  then compactor, then selector — in order of risk).
+  then compactor, then selector — in order of risk). Observer backend is the
+  target from day one; if M02-04b is not ready the stateless backend ships
+  first and the observer follows in the same milestone.
+- What the observer ingests verbatim vs by reference: mentor text and user
+  messages verbatim; tool results as the compressed form plus reference (the
+  raw blob would flood a small state and is fetchable anyway).
 - Latency budgets per role for the reference machine (from M02-07 bench).
 - Whether compactor output goes via `role: "system"` messages or a user
   block, after testing cache behaviour live.
+- Append-only rule (SPEC §6): every role prompt and the mentor prompt layout
+  must be checked for prefix stability — compaction replaces a suffix, system
+  text is frozen per session. Verify with the mentor's `cache_read_input_tokens`
+  and the local slot's reused-prefix count in the trace.

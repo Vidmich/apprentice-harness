@@ -96,6 +96,7 @@ CREATE INDEX mentor_calls_time ON mentor_calls(started_at);
 | `tool.call` | `{call_id, name, input_hash, input_bytes, risk}` (M01) | input JSON |
 | `tool.result` | `{call_id, ok, duration_ms, output_bytes, truncated: bool, summary}` (M01) | raw output |
 | `apprentice.invocation` | `{role, model, adapter, protocol_version, latency_ms, bypassed, reason?, tokens_in, tokens_out}` (M03) | input/output pair JSON |
+| `apprentice.state` | `{backend: kv|recurrent, model, adapter, step_id, bytes, tokens_seen}` (M02/M03) | opaque state snapshot (binary; may be tens–hundreds of MB, so a retention policy prunes old snapshots while keeping the event row) |
 | `permission.decision` | `{request_id, tool, decision, source}` (M01) | – |
 | `outcome` | `{kind: tests|user_accept|user_reject|task_done|error, details}` (M01) | – |
 | `feedback` | `{target_event_id, rating, tags, note_len}` (M05) | note |
