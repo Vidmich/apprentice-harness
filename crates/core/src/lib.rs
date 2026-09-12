@@ -10,6 +10,7 @@ pub mod mentor;
 pub mod runtime;
 pub mod secrets;
 pub mod stats;
+pub mod tools;
 pub mod trace;
 
 /// Logging setup, shared with the CLI and GUI through `apprentice-common`.

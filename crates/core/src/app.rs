@@ -1,7 +1,7 @@
 //! State shared by everything one daemon process hosts (task M00-08):
 //! paths, the config loader, the trace store and its writer, the secret
-//! store, the lazily built mentor, the agent registry and the shutdown
-//! token. RPC handlers are thin adapters over it; [`AppState::register`]
+//! store, the lazily built mentor, the agent registry, the tool registry
+//! and the shutdown token. RPC handlers are thin adapters over it; [`AppState::register`]
 //! wires all of them.
 
 use std::sync::{Arc, Mutex};
@@ -17,6 +17,7 @@ use crate::mentor::{AnthropicMentor, Mentor};
 use crate::runtime::AgentRegistry;
 use crate::secrets::{ChainStore, SecretError, api_key_name};
 use crate::stats::StatsService;
+use crate::tools::{ToolRegistry, ToolsService};
 use crate::trace::{NewSession, SessionStatus, TraceError, TraceService, TraceStore, TraceWriter};
 
 /// Errors from opening the state or building the mentor.
@@ -56,6 +57,7 @@ pub struct AppState {
     secrets: ChainStore,
     mentor: Mutex<Option<Arc<dyn Mentor>>>,
     agents: AgentRegistry,
+    tools: Arc<ToolRegistry>,
     shutdown: CancellationToken,
 }
 
@@ -74,6 +76,7 @@ impl std::fmt::Debug for AppState {
                 &self.mentor.lock().is_ok_and(|m| m.is_some()),
             )
             .field("agents_running", &self.agents.running())
+            .field("tools", &self.tools.len())
             .field("shutting_down", &self.shutdown.is_cancelled())
             .finish_non_exhaustive()
     }
@@ -108,6 +111,7 @@ impl AppState {
             secrets,
             mentor: Mutex::new(None),
             agents: AgentRegistry::new(),
+            tools: Arc::new(ToolRegistry::new()),
             shutdown: CancellationToken::new(),
         }))
     }
@@ -141,6 +145,12 @@ impl AppState {
     /// The agents running in this process.
     pub fn agents(&self) -> &AgentRegistry {
         &self.agents
+    }
+
+    /// The tools the mentor can call. Empty until the host registers
+    /// them (the built-in set arrives with M01-03..06).
+    pub fn tools(&self) -> &Arc<ToolRegistry> {
+        &self.tools
     }
 
     /// The current user-level config, read fresh (the loader is cheap and
@@ -225,7 +235,8 @@ impl AppState {
     }
 
     /// Registers every core handler: `config.*`, `auth.*`, `session.*`,
-    /// `agent.*`, `trace.*`, `stats.*`. `daemon.*` is the host's.
+    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`. `daemon.*` is the
+    /// host's.
     pub fn register(self: &Arc<Self>, router: &mut Router) {
         crate::runtime::rpc::register(self, router);
         let state = Arc::clone(self);
@@ -235,6 +246,11 @@ impl AppState {
         Arc::new(TraceService::new(Arc::clone(&self.store))).register(router);
         Arc::new(StatsService::new(
             Arc::clone(&self.store),
+            self.loader.clone(),
+        ))
+        .register(router);
+        Arc::new(ToolsService::new(
+            Arc::clone(&self.tools),
             self.loader.clone(),
         ))
         .register(router);
@@ -339,6 +355,7 @@ mod tests {
                 "session.list",
                 "stats.reprice",
                 "stats.tokens",
+                "tools.list",
                 "trace.get",
                 "trace.list",
             ]

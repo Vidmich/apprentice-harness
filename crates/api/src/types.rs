@@ -174,3 +174,21 @@ mod tests {
         assert_eq!(u.cache_read_input_tokens, 0);
     }
 }
+
+/// A tool as `tools.list` reports it (task M01-01).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolInfo {
+    pub name: String,
+    /// The text the mentor sees.
+    pub description: String,
+    /// JSON Schema (draft 2020-12) of the tool's input.
+    pub input_schema: Value,
+    pub risk: crate::events::Risk,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Timeout override in seconds; absent = the per-risk default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_s: Option<u64>,
+    /// `false` when `tools.disabled` names it: not offered to the mentor.
+    pub enabled: bool,
+}

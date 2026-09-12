@@ -18,6 +18,7 @@ pub struct Config {
     pub daemon: DaemonConfig,
     pub apprentice: ApprenticeConfig,
     pub permissions: PermissionsConfig,
+    pub tools: ToolsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +174,55 @@ impl Default for PermissionsConfig {
     }
 }
 
+/// Limits of the tool system (task M01-01). Workspace-overridable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolsConfig {
+    /// Tool names the mentor is not offered (`tools.list` reports them as
+    /// disabled).
+    pub disabled: Vec<String>,
+    /// Longest raw output captured in the trace; beyond it the blob keeps
+    /// the head and the tail and the result is marked
+    /// `truncated_at_capture`.
+    pub max_capture_bytes: u64,
+    /// Longest tool result the mentor receives (head + tail with an
+    /// omission marker); the trace keeps the whole output.
+    pub max_mentor_bytes: u64,
+    /// Default timeouts in seconds by risk class; a tool spec may override.
+    pub timeout_s: ToolTimeouts,
+}
+
+impl Default for ToolsConfig {
+    fn default() -> Self {
+        Self {
+            disabled: Vec::new(),
+            max_capture_bytes: 8 * 1024 * 1024,
+            max_mentor_bytes: 32 * 1024,
+            timeout_s: ToolTimeouts::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolTimeouts {
+    pub read_only: u64,
+    pub write: u64,
+    pub execute: u64,
+    pub network: u64,
+}
+
+impl Default for ToolTimeouts {
+    fn default() -> Self {
+        Self {
+            read_only: 30,
+            write: 30,
+            execute: 600,
+            network: 120,
+        }
+    }
+}
+
 impl Config {
     /// Built-in defaults, including the price table.
     pub fn builtin() -> Self {
@@ -191,6 +241,7 @@ pub const WORKSPACE_OVERRIDABLE: &[&str] = &[
     "mentor.max_tokens",
     "apprentice.",
     "permissions.",
+    "tools.",
 ];
 
 /// Whether a dotted leaf key may appear in a workspace config.
@@ -237,6 +288,7 @@ mod tests {
         assert!(workspace_overridable("mentor.model"));
         assert!(workspace_overridable("apprentice.enabled"));
         assert!(workspace_overridable("permissions.default_mode"));
+        assert!(workspace_overridable("tools.disabled"));
         assert!(!workspace_overridable("mentor.base_url"));
         assert!(!workspace_overridable("apprentice"));
         assert!(!workspace_overridable("apprenticex.enabled"));

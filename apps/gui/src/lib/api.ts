@@ -261,6 +261,26 @@ export interface StatsRepriceResult {
   unpriced: number;
 }
 
+// ---------------------------------------------------------------- tools.*
+
+export interface ToolsListParams {
+  workspace?: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  input_schema: unknown;
+  risk: Risk;
+  tags?: string[];
+  timeout_s?: number;
+  enabled: boolean;
+}
+
+export interface ToolsListResult {
+  tools: ToolInfo[];
+}
+
 /** Every method: wire name → { params, result }. */
 export interface Methods {
   "daemon.hello": { params: HelloParams; result: HelloResult };
@@ -280,6 +300,7 @@ export interface Methods {
   "trace.get": { params: TraceGetParams; result: TraceGetResult };
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
+  "tools.list": { params: ToolsListParams; result: ToolsListResult };
 }
 
 export type MethodName = keyof Methods;
@@ -307,6 +328,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "trace.get",
   "stats.tokens",
   "stats.reprice",
+  "tools.list",
 ];
 
 // ---------------------------------------------------------------- events

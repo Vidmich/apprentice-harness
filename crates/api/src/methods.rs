@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::types::{
-    ConfigLayer, ConfigSource, EventSummary, RunOptions, SessionSummary, TokenStats, TraceEvent,
+    ConfigLayer, ConfigSource, EventSummary, RunOptions, SessionSummary, TokenStats, ToolInfo,
+    TraceEvent,
 };
 
 /// A typed RPC method.
@@ -351,6 +352,24 @@ method!(
     StatsRepriceResult
 );
 
+// ---------------------------------------------------------------- tools.*
+
+/// `tools.list`: every registered tool with whether the config for
+/// `workspace` (`tools.disabled`) leaves it enabled.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ToolsListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolsListResult {
+    /// Sorted by name.
+    pub tools: Vec<ToolInfo>,
+}
+
+method!(ToolsList, "tools.list", ToolsListParams, ToolsListResult);
+
 /// Every method name known to this API version, for parity checks and
 /// documentation.
 pub const ALL_METHODS: &[&str] = &[
@@ -371,6 +390,7 @@ pub const ALL_METHODS: &[&str] = &[
     TraceGet::NAME,
     StatsTokens::NAME,
     StatsReprice::NAME,
+    ToolsList::NAME,
 ];
 
 #[cfg(test)]

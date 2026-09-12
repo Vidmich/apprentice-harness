@@ -14,6 +14,7 @@ mod out;
 mod run;
 mod session;
 mod stats;
+mod tools;
 mod trace;
 
 use std::path::PathBuf;
@@ -125,6 +126,9 @@ enum Command {
     /// Token usage and cost.
     #[command(subcommand)]
     Stats(stats::StatsCommand),
+    /// The tools the mentor can call.
+    #[command(subcommand)]
+    Tools(tools::ToolsCommand),
     /// Print environment, paths, versions, daemon and hardware facts for bug reports.
     Doctor,
     /// Print a shell completion script
@@ -236,6 +240,7 @@ fn run(cli: Cli, out: Out) -> anyhow::Result<()> {
         Command::Run(args) => run::run(&ctx, &args),
         Command::Trace(cmd) => trace::run(&ctx, &cmd),
         Command::Stats(cmd) => stats::run(&ctx, &cmd),
+        Command::Tools(cmd) => tools::run(&ctx, &cmd),
         Command::Doctor => doctor::run(&ctx.paths, log.ok().as_ref(), ctx.out.json),
         Command::Completions { .. } => unreachable!("handled above"),
     }
@@ -331,6 +336,16 @@ mod tests {
         assert!(matches!(
             c.command,
             Command::Stats(stats::StatsCommand::Reprice(_))
+        ));
+    }
+
+    #[test]
+    fn tools_list_parses() {
+        let c = Cli::try_parse_from(["harness", "tools", "list", "--workspace", ".", "--describe"])
+            .unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Tools(tools::ToolsCommand::List(_))
         ));
     }
 

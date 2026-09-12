@@ -1,6 +1,6 @@
 # M01-01 — Tool system core
 
-Status: todo
+Status: done
 Depends on: M00-06, M00-11
 Size: M
 
@@ -90,15 +90,20 @@ per workspace is a config key `tools.disabled = ["shell"]`.
 
 ## Acceptance
 
-- [ ] A `MockTool` in tests exercises: schema failure → error result;
+- [x] A `MockTool` in tests exercises: schema failure → error result;
       timeout → error result and `tool.result{ok:false}`; cancel →
       `Cancelled`; large output → blob stored fully, mentor text truncated
-      with marker; summary present.
-- [ ] Registry serialises tool defs deterministically (sorted by name) —
-      snapshot test.
-- [ ] Parallel policy test: 2 read-only + 1 write call → read-only run
+      with marker; summary present. *`crates/core/tests/tools.rs`; also
+      unknown tool, gate denial, `is_error` results, JSON and binary
+      content, the capture limit, summary normalisation.*
+- [x] Registry serialises tool defs deterministically (sorted by name) —
+      snapshot test. *`tools__tool_defs.snap`, `tools__tools_list.snap`.*
+- [x] Parallel policy test: 2 read-only + 1 write call → read-only run
       concurrently, write runs after; results returned in original order.
-- [ ] `tools.list` reflects `tools.disabled` from workspace config.
+      *Plus an `Execute` call, which runs after the write.*
+- [x] `tools.list` reflects `tools.disabled` from workspace config.
+      *Through `ToolsService` with a user and a workspace `config.toml`;
+      `harness tools list` checked against a live daemon (empty list).*
 
 ## Verification
 
@@ -110,3 +115,65 @@ per workspace is a config key `tools.disabled = ["shell"]`.
   the GUI (`agent.tool_progress` event added in M01-08); not required for
   read/write tools.
 - Keep `ToolContent::Binary` for future screenshots (vision role, M10).
+
+## Completion notes (2026-09-12)
+
+- **Module** `crates/core/src/tools/`: `mod.rs` (the `Tool` trait,
+  `ToolSpec`, `ToolContext`, `ToolEnv`, `ToolOutput`/`ToolContent`,
+  `ToolError`, `ToolProgress`), `schema.rs` (name rules, compiled
+  validators), `registry.rs`, `limits.rs` (head + tail cuts on char
+  boundaries, one-line summaries), `execute.rs` (the wrapper and the
+  batch policy), `rpc.rs` (`tools.list`). `Risk` is the one already in
+  `apprentice-api` (events carry it), re-exported.
+- **Deviations from the sketch.** `ToolContext.workspace` is
+  `Option<Arc<PathBuf>>` (the root) until M01-02 provides `Workspace`.
+  `ToolSpec` carries `timeout_s` (the per-tool override) instead of a
+  metadata bag. Step 2 of the wrapper (record `tool.call`) runs before
+  step 1 (validate) so the trace also has calls that never ran — an
+  unknown name or a schema violation is what the mentor did, and the
+  apprentice will learn from it. The permission step is a `Gate` trait
+  (`permit(ctx, spec, input) -> Result<(), reason>`), `AllowAll` until
+  M01-07; `reason` is the text the mentor reads, so "denied by user" is
+  the engine's to say. Tool ids are the mentor's `tool_use` ids, not
+  generated `CallId`s: the `tool.call`/`tool.result` events carry them as
+  `call_id` and the result block echoes them.
+- **Trace payloads.** `tool.call {call_id, name, risk, input_hash,
+  input_bytes}` + the input JSON as blob (always; content-addressed, so
+  small inputs cost one row). `tool.result {call_id, name, ok, kind,
+  duration_ms, output_bytes, mentor_bytes, truncated, summary,
+  media_type?, message?, metadata?, risk?, truncated_at_capture?}` + the
+  raw output as blob. `kind` is `ok | error | invalid_input | denied |
+  timeout | cancelled | failed`; `ok` is `kind == ok`. `is_error`
+  outputs are captured like successes (the diagnostic is the useful
+  part); wrapper errors have no blob and put their message in `message`.
+- **Limits.** New `[tools]` config section (workspace-overridable):
+  `disabled`, `max_capture_bytes` (8 MiB), `max_mentor_bytes` (32 KiB),
+  `timeout_s.{read_only,write,execute,network}` (30/30/600/120). The
+  mentor's copy is 3/4 head + 1/4 tail around
+  `[... N bytes omitted, full result id <blob>]`; the capture cut uses
+  the same shape and records the real `output_bytes`. Both cuts respect
+  UTF-8 boundaries. Binary content reaches the mentor as a one-line
+  placeholder naming media type, size and blob (vision is M10). JSON
+  content is pretty-printed for the mentor, stored compact.
+- **Timeouts and cancellation.** The tool gets a child token; on the
+  agent token or the timeout the wrapper cancels the child and drops the
+  future, so a tool that ignores its token is still abandoned. A call
+  that starts after cancellation is recorded as `cancelled` without
+  running. The 1 s floor on timeouts keeps `timeout_s = 0` from meaning
+  "never".
+- **Policy.** `execute_all` partitions by `is_mutating` (`Write` and
+  `Execute`); the rest, including unknown names, run in a `join_all`,
+  then the mutating calls in order. `tool.call` rows of the concurrent
+  phase can interleave; results keep the mentor's order.
+- **Wire.** `tools.list {workspace?} → {tools: [ToolInfo + enabled]}` in
+  `apprentice-api` (snapshot `tools_list`), `api.ts` and the vitest
+  parity test (18 methods), `harness tools list [--workspace DIR]
+  [--describe]`. `AppState` owns an `Arc<ToolRegistry>` (`tools()`),
+  empty until M01-03 registers the file tools.
+- **Dependency.** `jsonschema` 0.56 without default features (no HTTP
+  resolver, no TLS); draft 2020-12, formats validated. `cargo deny`
+  stays clean.
+- Open: the runtime does not call any of this yet (`build_request` still
+  sends no tools) — M01-08 wires `registry.defs(&config.tools.disabled)`
+  into the request, the executor into the loop and `ToolProgress` into
+  `agent.tool_progress`.

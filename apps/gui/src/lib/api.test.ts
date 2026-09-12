@@ -13,6 +13,7 @@ import {
   type HelloResult,
   KNOWN_EVENT_TYPES,
   type TokenStats,
+  type ToolsListResult,
   asKnown,
   eventShapeError,
   isEventNotification,
@@ -90,8 +91,16 @@ describe("api.ts against the Rust snapshots", () => {
     expect(typeof stats.apprentice.invocations).toBe("number");
   });
 
+  it("reads the tool list", () => {
+    const [, result] = snapshot("tools_list") as [unknown, ToolsListResult];
+    expect(result.tools.map((t) => [t.name, t.risk, t.enabled])).toEqual([
+      ["read_file", "read_only", true],
+      ["shell", "execute", false],
+    ]);
+  });
+
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(17);
+    expect(ALL_METHODS.length).toBe(18);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

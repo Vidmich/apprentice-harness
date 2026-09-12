@@ -6,10 +6,12 @@ use apprentice_api::events::{AgentStatus, Event, EventNotification, LogLevel, Ri
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
-    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, TraceGetParams, TraceListParams,
+    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
+    TraceGetParams, TraceListParams,
 };
 use apprentice_api::types::{
-    ApprenticeStats, ConfigLayer, Effort, RunOptions, StatsRange, TokenBucket, TokenStats, Usage,
+    ApprenticeStats, ConfigLayer, Effort, RunOptions, StatsRange, TokenBucket, TokenStats,
+    ToolInfo, Usage,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -140,6 +142,44 @@ fn stats_shape() {
                 examined: 4,
                 changed: 2,
                 unpriced: 1
+            }
+        )
+    );
+}
+
+#[test]
+fn tools_shape() {
+    assert_json_snapshot!(
+        "tools_list",
+        (
+            ToolsListParams {
+                workspace: Some("/work/repo".into())
+            },
+            ToolsListResult {
+                tools: vec![
+                    ToolInfo {
+                        name: "read_file".into(),
+                        description: "Read a file from the workspace.".into(),
+                        input_schema: json!({
+                            "type": "object",
+                            "properties": {"path": {"type": "string"}},
+                            "required": ["path"]
+                        }),
+                        risk: Risk::ReadOnly,
+                        tags: vec!["files".into()],
+                        timeout_s: None,
+                        enabled: true,
+                    },
+                    ToolInfo {
+                        name: "shell".into(),
+                        description: "Run a command.".into(),
+                        input_schema: json!({"type": "object"}),
+                        risk: Risk::Execute,
+                        tags: vec![],
+                        timeout_s: Some(900),
+                        enabled: false,
+                    }
+                ]
             }
         )
     );

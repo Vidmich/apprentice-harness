@@ -1,0 +1,43 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(ToolsListParams { workspace: Some(\"/work/repo\".into()) }, ToolsListResult\n{\n    tools:\n    vec![ToolInfo\n    {\n        name: \"read_file\".into(), description:\n        \"Read a file from the workspace.\".into(), input_schema:\n        json!({\n            \"type\": \"object\", \"properties\": {\"path\": {\"type\": \"string\"}},\n            \"required\": [\"path\"]\n        }), risk: Risk::ReadOnly, tags: vec![\"files\".into()], timeout_s: None,\n        enabled: true,\n    }, ToolInfo\n    {\n        name: \"shell\".into(), description: \"Run a command.\".into(),\n        input_schema: json!({\"type\": \"object\"}), risk: Risk::Execute, tags:\n        vec![], timeout_s: Some(900), enabled: false,\n    }]\n})"
+---
+[
+  {
+    "workspace": "/work/repo"
+  },
+  {
+    "tools": [
+      {
+        "name": "read_file",
+        "description": "Read a file from the workspace.",
+        "input_schema": {
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "risk": "read_only",
+        "tags": [
+          "files"
+        ],
+        "enabled": true
+      },
+      {
+        "name": "shell",
+        "description": "Run a command.",
+        "input_schema": {
+          "type": "object"
+        },
+        "risk": "execute",
+        "timeout_s": 900,
+        "enabled": false
+      }
+    ]
+  }
+]

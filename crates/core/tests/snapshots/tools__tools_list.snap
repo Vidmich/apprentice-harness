@@ -1,0 +1,110 @@
+---
+source: crates/core/tests/tools.rs
+expression: "reg.list(&[\"shell\".into()])"
+---
+[
+  {
+    "name": "grep",
+    "description": "Mock tool grep.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "mock"
+    ],
+    "enabled": true
+  },
+  {
+    "name": "read_file",
+    "description": "Mock tool read_file.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "mock"
+    ],
+    "enabled": true
+  },
+  {
+    "name": "shell",
+    "description": "Mock tool shell.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "risk": "execute",
+    "tags": [
+      "mock"
+    ],
+    "enabled": false
+  },
+  {
+    "name": "write_file",
+    "description": "Mock tool write_file.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "risk": "write",
+    "tags": [
+      "mock"
+    ],
+    "enabled": true
+  }
+]

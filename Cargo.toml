@@ -35,6 +35,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 # storage
 rusqlite = { version = "0.40", features = ["bundled"] }
 sha2 = "0.11"
+# tools
+jsonschema = { version = "0.56", default-features = false }
 # ipc
 interprocess = { version = "2.4", features = ["tokio"] }
 # cli / logging
