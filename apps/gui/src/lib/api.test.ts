@@ -1,0 +1,104 @@
+// Drift check: the Rust snapshots in `crates/api/tests/snapshots` (task
+// M00-02) must parse against the hand-written types in `api.ts`.
+
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import {
+  ALL_METHODS,
+  API_VERSION,
+  type AgentRunResult,
+  type EventNotification,
+  type HelloResult,
+  KNOWN_EVENT_TYPES,
+  type TokenStats,
+  asKnown,
+  eventShapeError,
+  isEventNotification,
+  isRpcError,
+} from "./api";
+
+const SNAPSHOTS = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../crates/api/tests/snapshots",
+);
+
+/** The JSON body of an insta `.snap` file (after the `---` header). */
+function snapshot(name: string): unknown {
+  const text = readFileSync(join(SNAPSHOTS, `snapshots__${name}.snap`), "utf8").replace(
+    /\r\n/g,
+    "\n",
+  );
+  const body = text.split("\n---\n").slice(1).join("\n---\n");
+  return JSON.parse(body);
+}
+
+describe("api.ts against the Rust snapshots", () => {
+  it("finds the snapshot directory", () => {
+    const files = readdirSync(SNAPSHOTS).filter((f) => f.endsWith(".snap"));
+    expect(files.length).toBeGreaterThan(10);
+  });
+
+  it("parses every event the daemon can emit", () => {
+    const notifications = snapshot("events") as unknown[];
+    expect(notifications.length).toBeGreaterThanOrEqual(KNOWN_EVENT_TYPES.length);
+    const seen = new Set<string>();
+    for (const n of notifications) {
+      expect(isEventNotification(n), JSON.stringify(n)).toBe(true);
+      const ev = (n as EventNotification).event;
+      expect(eventShapeError(ev), JSON.stringify(ev)).toBeUndefined();
+      seen.add(ev.type);
+    }
+    // Every type this build knows appears in the snapshot, so a Rust-side
+    // rename shows up as a missing type here.
+    for (const t of KNOWN_EVENT_TYPES) expect(seen.has(t), t).toBe(true);
+  });
+
+  it("reads usage, cost and the terminal status from the events", () => {
+    const notifications = snapshot("events") as EventNotification[];
+    const known = notifications.map((n) => asKnown(n.event));
+    const usage = known.find((e) => e?.type === "agent.usage");
+    expect(usage).toMatchObject({
+      usage: { input_tokens: 1204, output_tokens: 310 },
+      cost_usd: 0.0138,
+    });
+    const finished = known.find((e) => e?.type === "agent.finished");
+    expect(finished).toMatchObject({ status: "error" });
+    if (finished?.type === "agent.finished") {
+      expect(isRpcError(finished.error)).toBe(true);
+      expect(finished.error?.data?.kind).toBe("cancelled");
+    }
+  });
+
+  it("matches the hello, error, agent.run and stats shapes", () => {
+    const hello = snapshot("hello_response") as { result: HelloResult };
+    expect(hello.result.api_version).toBe(API_VERSION);
+    expect(typeof hello.result.daemon_version).toBe("string");
+    expect(typeof hello.result.pid).toBe("number");
+
+    const err = snapshot("error_response") as { error: unknown };
+    expect(isRpcError(err.error)).toBe(true);
+
+    const run = snapshot("agent_run_result") as AgentRunResult;
+    expect(typeof run.agent_id).toBe("string");
+    expect(typeof run.subscription).toBe("string");
+
+    const stats = snapshot("token_stats") as TokenStats;
+    expect(typeof stats.totals.cost_usd).toBe("number");
+    expect(Array.isArray(stats.by_model)).toBe(true);
+    expect(typeof stats.apprentice.invocations).toBe("number");
+  });
+
+  it("lists every method the daemon knows, namespaced", () => {
+    expect(ALL_METHODS.length).toBe(17);
+    for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
+  });
+
+  it("skips unknown event types instead of failing", () => {
+    const n: unknown = { subscription: "a", seq: 1, event: { type: "agent.future_thing", x: 1 } };
+    expect(isEventNotification(n)).toBe(true);
+    expect(asKnown((n as EventNotification).event)).toBeUndefined();
+    expect(eventShapeError((n as EventNotification).event)).toBeUndefined();
+  });
+});

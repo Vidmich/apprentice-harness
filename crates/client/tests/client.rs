@@ -273,6 +273,29 @@ async fn server_closing_mid_request_returns_closed() {
 }
 
 #[tokio::test]
+async fn closed_resolves_when_the_server_goes_away() {
+    let (client, server) = start(router(None), ClientOptions::default());
+    client.hello("t", "0", None).await.unwrap();
+    let waiter = client.clone();
+    let waiting = tokio::spawn(async move { waiter.closed().await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !waiting.is_finished(),
+        "closed() resolved on an open connection"
+    );
+    server.abort();
+    tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .expect("closed() did not resolve")
+        .unwrap();
+    assert!(client.is_closed());
+    // Already closed: returns at once.
+    tokio::time::timeout(Duration::from_millis(100), client.closed())
+        .await
+        .expect("closed() must not wait on a closed connection");
+}
+
+#[tokio::test]
 async fn call_times_out() {
     let (client, _server) = start(
         router(None),

@@ -171,7 +171,9 @@ impl DaemonClient {
     pub async fn connect(options: &ConnectOptions) -> Result<Connected, ConnectError> {
         let info_file = DaemonInfo::path(&options.data_dir);
         let mut state = "not found";
+        let mut stale_pid = None;
         if let Some(info) = DaemonInfo::read(&options.data_dir)? {
+            stale_pid = Some(info.pid);
             match attempt(&info, options).await {
                 Ok((client, hello)) => {
                     return Ok(Connected {
@@ -227,19 +229,29 @@ impl DaemonClient {
                         code: status.to_string(),
                     });
                 }
+                // The daemon named in the file is alive after all.
+                stale_pid = None;
             }
             if let Some(info) = DaemonInfo::read(&options.data_dir)? {
-                match attempt(&info, options).await {
-                    Ok((client, hello)) => {
-                        return Ok(Connected {
-                            client,
-                            hello,
-                            info,
-                            spawned: true,
-                        });
+                // The endpoint name is derived from the data dir, so the
+                // new daemon listens on it before rewriting `daemon.json`:
+                // an attempt with the old file's token would be rejected
+                // as `unauthorized`. Wait for the file to change.
+                if Some(info.pid) == stale_pid {
+                    last_error = Some("daemon.json still names the old daemon".into());
+                } else {
+                    match attempt(&info, options).await {
+                        Ok((client, hello)) => {
+                            return Ok(Connected {
+                                client,
+                                hello,
+                                info,
+                                spawned: true,
+                            });
+                        }
+                        Err(Attempt::Unreachable(e)) => last_error = Some(e),
+                        Err(Attempt::Rejected(e)) => return Err(ClientError::Rpc(e).into()),
                     }
-                    Err(Attempt::Unreachable(e)) => last_error = Some(e),
-                    Err(Attempt::Rejected(e)) => return Err(ClientError::Rpc(e).into()),
                 }
             }
             if Instant::now() >= deadline {

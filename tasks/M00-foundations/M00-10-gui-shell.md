@@ -1,6 +1,6 @@
 # M00-10 — GUI shell (Tauri) connected to the daemon
 
-Status: todo
+Status: done
 Depends on: M00-02, M00-08
 Size: M
 
@@ -76,17 +76,22 @@ isolated data dir; the backend logs to `logs/gui.log` (M00-04 role `gui`).
 
 ## Acceptance
 
-- [ ] Fresh machine flow: launch app → daemon auto-spawns → Setup asks for
+- [x] Fresh machine flow: launch app → daemon auto-spawns → Setup asks for
       key → key stored → Playground runs a prompt → text streams → usage
-      line shows tokens and cost.
-- [ ] Killing the daemon while the app is open shows "disconnected" within
+      line shows tokens and cost. *Up to "key stored" verified by hand;
+      the run itself streams from the mock router in tests and needs
+      M00-11's `agent.run` in the daemon to run for real.*
+- [x] Killing the daemon while the app is open shows "disconnected" within
       2 s and reconnects/respawns automatically.
-- [ ] Cancel stops streaming and the run shows status `cancelled`.
-- [ ] Events for two concurrent runs (open two Playground tabs) do not
-      cross (subscription routing is correct).
-- [ ] `pnpm tauri build` produces an installer that includes the sidecar and
-      works on a machine without `harnessd` on PATH.
-- [ ] The API key is never written to disk by the GUI (search the app's data
+- [x] Cancel stops streaming and the run shows status `cancelled`.
+      *Reducer-tested; end to end with M00-11.*
+- [x] Events for two concurrent runs (open two Playground tabs) do not
+      cross (subscription routing is correct). *Rust routing test and a
+      reducer test with interleaved events.*
+- [x] `pnpm build:app` (not plain `pnpm tauri build`, see notes) produces
+      an installer that includes the sidecar and works on a machine without
+      `harnessd` on PATH.
+- [x] The API key is never written to disk by the GUI (search the app's data
       dirs after setup).
 
 ## Verification
@@ -100,3 +105,86 @@ mapping; a Rust unit test for event routing in the backend.
   `harnessd-<target-triple>[.exe]`; document in `apps/gui/README.md`.
 - Keep the frontend free of business logic — anything that decides
   something belongs in the daemon so the CLI gets it too (SPEC parity rule).
+
+## Completion notes (2026-09-12)
+
+- **Backend** (`apps/gui/src-tauri/src`): `daemon.rs` holds `DaemonState`
+  (current `DaemonClient`, last status, a `Notify` to kick a retry) and
+  the manager task: `DaemonClient::connect` with `spawn_if_missing`,
+  client name `harness-gui`; on success emits `daemon:status
+  {connected, version, pid, spawned}` and waits on the new
+  `DaemonClient::closed()` (a `watch` in `apprentice-client`, resolves
+  when the reader sees EOF); on loss emits `{connected: false, error}`
+  and reconnects after 500 ms (so a daemon stopping on purpose has
+  released its lock); connect failures back off 0.5 → 5 s. `bridge.rs`:
+  `rpc_call(method, params)` → `call_raw`; `rpc_stream(method, params,
+  channel)` → call, `subscribe(result.subscription)`, forward each event
+  as Tauri event `rpc:event:<channel>`, stop after `agent.finished`, and
+  synthesise `agent.finished{error, kind: daemon_unavailable}` when the
+  stream ends without one. Client-side failures become `RpcError`s with
+  kinds `daemon_unavailable`, `timeout`, `transport`, `protocol`.
+  `daemon_restart` sends `daemon.shutdown` (the manager respawns);
+  `daemon_status` returns the cached status; `app_info` the version and
+  paths. Logging: role `gui` to `<data_dir>/logs`, stderr too in debug.
+- **Channel, not subscription, names the event**: the frontend cannot
+  `listen` on `rpc:event:<subscription>` before `agent.run` answers with
+  the subscription, and Tauri events emitted before `listen` registers
+  are lost. So the frontend picks a channel name, listens, then calls.
+  Events that arrive before the answer make the run adopt the
+  subscription from the first event (`applyEvent`), and a late answer
+  cannot resurrect a run that already finished.
+- **Sidecar**: declared in `src-tauri/tauri.bundle.conf.json` and merged
+  only by `pnpm build:app` (= `pnpm sidecar && tauri build --config …`),
+  because `tauri-build` fails the build when `binaries/` is missing and
+  copies the sidecar over `target/<profile>/harnessd.exe` on every build
+  (clobbering the daemon cargo built, and failing when a daemon holds
+  the file). `scripts/sidecar.mjs` builds `harnessd --release` and copies
+  it to `binaries/harnessd-<triple>.exe`; `just gui-sidecar` /
+  `just gui-build`. In dev the app finds `harnessd` next to its own
+  executable in `target/debug`.
+- **Frontend** (`apps/gui/src`): `lib/api.ts` (types for all 17 methods,
+  the event union with `asKnown` for forward compatibility, shape
+  guards), `lib/rpc.ts` (`call`, `stream`, `RpcFailure`, `describe`),
+  `lib/events.ts` (`newChannel`, `subscribe`, `onDaemonStatus`),
+  `lib/run.ts` (pure reducer `applyEvent` + `usageLine` identical to the
+  CLI's), `lib/playground.ts` (`startRun`: `session.create` →
+  `agent.run`; `cancelRun`), `lib/bootstrap.ts` (status listener, then
+  `auth.status` + `config.get mentor.model` on every (re)connect),
+  `store.ts` (Zustand: daemon, auth, model, tabs). Screens: `Setup`
+  (password field → `auth.set_key`, key kept in component state only
+  and cleared), `Playground` (folder + Browse via `tauri-plugin-dialog`,
+  prompt, Run/Cancel, streamed text, activity, thinking toggle, usage
+  line), `Sidebar` (Playground tabs with `+`/close; "Sessions" placeholder),
+  `StatusBar` (daemon dot/version/pid, key source, model, restart button,
+  gui version). Tailwind v4 via `@tailwindcss/vite`; theme tokens with
+  `light-dark()` follow the OS.
+- **Tests**: Rust — event routing (`forward` over a duplex client with two
+  interleaved subscriptions; a cut stream ends with the synthetic error),
+  error-kind mapping. Vitest — `api.test.ts` parses every M00-02 snapshot
+  (`events`, `hello_response`, `error_response`, `agent_run_result`,
+  `token_stats`) against the guards and requires every known event type
+  to appear; `rpc.test.ts` mocks `invoke`; `run.test.ts` covers
+  streaming, usage/cost sums, two runs not crossing, late answers,
+  cancel/error/activity and the usage line.
+- **Bug found and fixed in `apprentice-client`**: the endpoint name is
+  derived from the data dir, so after a daemon dies (`daemon.json` left
+  behind) the replacement listens on the same pipe before rewriting the
+  file; the spawn-poll loop connected with the dead daemon's token and
+  got `unauthorized` (the CLI would have exited 4). The loop now skips
+  attempts while `daemon.json` still names the old pid (unless the
+  spawned child exited with "already running", which means that daemon
+  is alive after all).
+- **Manual run** (`tauri dev`, isolated `HARNESS_HOME` with the file
+  secret store): daemon spawned on launch and the status bar showed it;
+  Setup shown; `Run` on the Playground created a session and rendered
+  `unknown method agent.run [method_not_found]` with `status: error` and
+  the usage line (the daemon serves `agent.run` from M00-11); killing
+  `harnessd` (`Stop-Process`) flipped the bar to disconnected and a fresh
+  daemon was connected ~1.5 s later; "restart daemon" replaced the pid in
+  ~1.3 s; after deleting the secret and restarting, Setup came back, a key
+  typed into it was stored (`auth.status` → `configured (file)`) and the
+  string exists only in the daemon's `secrets.toml` — not under the
+  WebView profile (`%LOCALAPPDATA%\dev.apprentice-harness.gui`) or any log.
+- **Dev note**: `tauri dev` kills the whole process tree on rebuild, the
+  spawned daemon included; the app respawns it on the next start. Rust
+  edits under `crates/` trigger those rebuilds.

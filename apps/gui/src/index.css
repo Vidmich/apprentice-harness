@@ -1,71 +1,45 @@
+@import "tailwindcss";
+
+/* Theme tokens follow the OS (`light-dark()` picks by `color-scheme`).
+   Tailwind exposes them as `bg-bg`, `text-fg`, `border-border`, ... */
+@theme {
+  --color-bg: light-dark(#ffffff, #161616);
+  --color-fg: light-dark(#1a1a1a, #e8e8e8);
+  --color-muted: light-dark(#6b6b6b, #9a9a9a);
+  --color-border: light-dark(#e3e3e3, #2c2c2c);
+  --color-panel: light-dark(#f6f6f6, #1f1f1f);
+  --color-accent: light-dark(#2f6fed, #6b9cff);
+  --color-ok: light-dark(#1f8a4c, #4cc27a);
+  --color-warn: light-dark(#b7791f, #e0a53a);
+  --color-bad: light-dark(#c62828, #ef6c6c);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+}
+
 :root {
   color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #6b6b6b;
-  --border: #e3e3e3;
-  --panel: #f6f6f6;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161616;
-    --fg: #e8e8e8;
-    --muted: #9a9a9a;
-    --border: #2c2c2c;
-    --panel: #1f1f1f;
-  }
-}
-* {
-  box-sizing: border-box;
-}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  overflow: hidden;
 }
-.shell {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  grid-template-rows: 1fr 28px;
-  grid-template-areas: "sidebar main" "status status";
-  height: 100%;
-}
-.sidebar {
-  grid-area: sidebar;
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  padding: 12px;
-}
-.sidebar h2 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 0 0 8px;
-}
-.main {
-  grid-area: main;
-  padding: 16px;
-}
-.statusbar {
-  grid-area: status;
-  border-top: 1px solid var(--border);
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  color: var(--muted);
-  font-size: 12px;
-}
-.muted {
-  color: var(--muted);
+
+@layer components {
+  .btn {
+    @apply rounded border border-border bg-panel px-3 py-1 text-sm text-fg hover:border-muted disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply rounded border border-accent bg-accent px-3 py-1 text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .input {
+    @apply rounded border border-border bg-bg px-2 py-1 text-sm text-fg outline-none focus:border-accent;
+  }
 }

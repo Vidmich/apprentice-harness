@@ -45,9 +45,17 @@ fmt:
 # Build + lint + test, the same set CI runs
 check: build lint test
 
-# Run the GUI in development mode
+# Run the GUI in development mode (set HARNESS_HOME for an isolated data dir)
 gui:
     pnpm --dir apps/gui tauri dev
+
+# Build the release daemon and copy it into place as the GUI sidecar
+gui-sidecar:
+    pnpm --dir apps/gui sidecar
+
+# Build the installer (bundles the daemon as a sidecar)
+gui-build:
+    pnpm --dir apps/gui build:app
 
 # Run the daemon in the foreground
 daemon *ARGS:

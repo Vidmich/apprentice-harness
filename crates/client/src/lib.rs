@@ -24,7 +24,7 @@ use apprentice_api::methods::{DaemonHello, HasSubscription, HelloParams, HelloRe
 use apprentice_api::transport::Endpoint;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tracing::{debug, warn};
 
 pub use connect::{ConnectError, ConnectOptions, Connected, DAEMON_PATH_ENV};
@@ -85,6 +85,8 @@ struct Inner {
     unclaimed: Mutex<(usize, HashMap<String, VecDeque<EventNotification>>)>,
     next_id: AtomicU64,
     closed: AtomicBool,
+    /// Flipped to `true` by `close`; `DaemonClient::closed` waits on it.
+    closed_tx: watch::Sender<bool>,
     options: ClientOptions,
     /// The reader task, stopped when the last handle goes away.
     reader: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
@@ -137,6 +139,7 @@ impl DaemonClient {
             unclaimed: Mutex::new((0, HashMap::new())),
             next_id: AtomicU64::new(1),
             closed: AtomicBool::new(false),
+            closed_tx: watch::Sender::new(false),
             options,
             reader: std::sync::Mutex::new(None),
         });
@@ -322,6 +325,15 @@ impl DaemonClient {
     pub fn is_closed(&self) -> bool {
         self.inner.closed.load(Ordering::Acquire)
     }
+
+    /// Resolves once the connection is gone (the daemon exited or closed
+    /// the socket). Returns at once when it already is.
+    pub async fn closed(&self) {
+        let mut rx = self.inner.closed_tx.subscribe();
+        // `wait_for` checks the current value first, so a close that
+        // happened before this call is not missed.
+        let _ = rx.wait_for(|closed| *closed).await;
+    }
 }
 
 impl Inner {
@@ -412,6 +424,7 @@ impl Inner {
         // Fail every waiting request and end every stream.
         self.pending.lock().await.clear();
         self.subs.lock().await.clear();
+        let _ = self.closed_tx.send(true);
         debug!("daemon connection closed");
     }
 }

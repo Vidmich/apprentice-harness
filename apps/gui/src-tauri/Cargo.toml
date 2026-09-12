@@ -17,10 +17,14 @@ tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 tauri = { version = "2.11", features = [] }
+tauri-plugin-dialog = "2.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
-apprentice-client = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 apprentice-api = { workspace = true }
+apprentice-client = { workspace = true }
+apprentice-common = { workspace = true }
 
 [lints]
 workspace = true
