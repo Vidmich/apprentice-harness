@@ -1,2 +1,4 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Every text file is checked out with LF on every platform, whatever
+# core.autocrlf says: prettier checks line endings, and the recorded SSE
+# fixtures and insta snapshots are compared byte for byte by tests.
+* text=auto eol=lf

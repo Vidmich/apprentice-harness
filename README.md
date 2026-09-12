@@ -8,6 +8,7 @@ model stays short and token-cheap — without lowering task success.
 - [SPEC.md](SPEC.md) — what the system is and how it is designed
 - [ROADMAP.md](ROADMAP.md) — milestones and exit criteria
 - [tasks/README.md](tasks/README.md) — task files and the fixed decisions every task assumes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — running the checks, recording fixtures, the task workflow
 
 ## Layout
 
@@ -25,7 +26,8 @@ protocol/        mentor–apprentice prompt protocol versions (from M03)
 
 ## Prerequisites
 
-- Rust stable (`rustup update stable`), MSVC build tools on Windows
+- Rust stable (`rustup update stable`; 1.88 or newer), MSVC build tools on Windows
+- `cargo-deny` (`cargo install cargo-deny --locked`; `just setup` does it)
 - Node 22+ and pnpm (`npm install -g pnpm`)
 - [uv](https://docs.astral.sh/uv/) for Python
 - [just](https://github.com/casey/just) (`uv tool install rust-just`)
@@ -34,8 +36,8 @@ protocol/        mentor–apprentice prompt protocol versions (from M03)
 ## Getting started
 
 ```
-just setup      # install frontend and Python dependencies
-just check      # build + lint + test everything
+just setup      # install frontend and Python dependencies, cargo-deny
+just check      # build + lint + test + deny, the same set CI runs
 just gui        # open the desktop app (dev mode)
 just cli -- --version
 ```

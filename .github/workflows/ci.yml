@@ -1,0 +1,176 @@
+# Continuous integration: the same checks as `just check`, on the three
+# platforms the project targets, plus cargo-deny and a GUI installer build.
+#
+# No job ever reaches the real Anthropic API: tests talk to wiremock only,
+# the live tests are `#[ignore]` behind HARNESS_LIVE, and ANTHROPIC_API_KEY is
+# never set here (the first step of every job refuses to run if it is).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  # Every harness process under test keeps its config and data here, never in
+  # the runner's real profile directories.
+  HARNESS_HOME: ${{ runner.temp }}/harness-home
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run with live credentials
+        shell: bash
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${HARNESS_LIVE:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY / HARNESS_LIVE must not be set in CI"
+            exit 1
+          fi
+          mkdir -p "$HARNESS_HOME"
+
+      - name: Install Linux GUI dependencies (Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/gui/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: ml/uv.lock
+
+      - name: Install frontend and Python dependencies
+        run: |
+          pnpm --dir apps/gui install --frozen-lockfile
+          uv sync --directory ml --locked
+
+      # Rust
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo build
+        run: cargo build --workspace
+      - name: cargo test
+        run: cargo test --workspace
+
+      # GUI frontend
+      - name: tsc --noEmit
+        run: pnpm --dir apps/gui typecheck
+      - name: eslint + prettier
+        run: pnpm --dir apps/gui lint
+      - name: vitest
+        run: pnpm --dir apps/gui test
+
+      # Python
+      - name: ruff
+        run: |
+          uv run --directory ml ruff check .
+          uv run --directory ml ruff format --check .
+      - name: pytest
+        run: uv run --directory ml pytest -q
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          rust-version: stable
+
+  gui-build:
+    name: gui installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run with live credentials
+        shell: bash
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${HARNESS_LIVE:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY / HARNESS_LIVE must not be set in CI"
+            exit 1
+          fi
+
+      - name: Install Linux GUI dependencies (Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gui-release
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/gui/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm --dir apps/gui install --frozen-lockfile
+
+      # Builds the release daemon, copies it in as the sidecar, then bundles.
+      - name: tauri build
+        run: pnpm --dir apps/gui build:app
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: apprentice-harness-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage

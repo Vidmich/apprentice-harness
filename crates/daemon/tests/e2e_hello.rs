@@ -55,20 +55,35 @@ fn sse(name: &str) -> ResponseTemplate {
 /// A home whose daemon keeps secrets in a file and talks to `mentor`.
 struct Home {
     dir: tempfile::TempDir,
+    api_key: String,
 }
 
 impl Home {
     fn new(mentor: &MockServer) -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("config.toml"),
-            format!(
+        Self::with_config(
+            &format!(
                 "[daemon]\nsecret_store = \"file\"\nidle_shutdown_min = 0\n\n[mentor]\nbase_url = \"{}\"\nmax_retries = 0\ntimeout_s = 30\n",
                 mentor.uri()
             ),
+            API_KEY,
         )
-        .unwrap();
-        Self { dir }
+    }
+
+    /// A home whose daemon talks to the real API with `api_key`.
+    fn live(api_key: &str) -> Self {
+        Self::with_config(
+            "[daemon]\nsecret_store = \"file\"\nidle_shutdown_min = 0\n",
+            api_key,
+        )
+    }
+
+    fn with_config(config: &str, api_key: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), config).unwrap();
+        Self {
+            dir,
+            api_key: api_key.to_owned(),
+        }
     }
 
     fn path(&self) -> &Path {
@@ -86,7 +101,7 @@ impl Home {
         c.arg("--home")
             .arg(self.path())
             .env_remove("HARNESS_LOG_LEVEL")
-            .env("ANTHROPIC_API_KEY", API_KEY)
+            .env("ANTHROPIC_API_KEY", &self.api_key)
             .env("HARNESS_DAEMON_PATH", HARNESSD)
             .env("NO_COLOR", "1")
             .timeout(Duration::from_secs(60));
@@ -101,7 +116,7 @@ impl Home {
             .arg(self.path())
             .args(["run", prompt])
             .env_remove("HARNESS_LOG_LEVEL")
-            .env("ANTHROPIC_API_KEY", API_KEY)
+            .env("ANTHROPIC_API_KEY", &self.api_key)
             .env("HARNESS_DAEMON_PATH", HARNESSD)
             .env("NO_COLOR", "1")
             .stdin(Stdio::null())
@@ -547,6 +562,62 @@ async fn a_graceful_shutdown_cancels_the_run_and_records_it() {
             assert_eq!(done["event"]["payload"]["status"], "cancelled");
             let err = h.event(find(&events, "mentor.error")["id"].as_str().unwrap(), false);
             assert_eq!(err["event"]["payload"]["kind"], "cancelled");
+        });
+    })
+    .await
+    .unwrap();
+}
+
+/// The M00 live smoke: one real call through the whole stack. Spends
+/// tokens; run with `HARNESS_LIVE=1 ANTHROPIC_API_KEY=... cargo test -p
+/// harnessd --test e2e_hello -- --ignored live` (or `just live`). CI never
+/// sets either variable.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "spends real tokens; needs HARNESS_LIVE=1 and ANTHROPIC_API_KEY"]
+async fn live_hello_against_the_real_api() {
+    if std::env::var("HARNESS_LIVE").ok().as_deref() != Some("1") {
+        eprintln!("HARNESS_LIVE != 1; skipping");
+        return;
+    }
+    let key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY");
+    let h = Arc::new(Home::live(&key));
+    tokio::task::spawn_blocking(move || {
+        with_daemon(&h, || {
+            let out = h
+                .harness()
+                .args(["--json", "run", "Reply with the single word: pong"])
+                .assert()
+                .success();
+            let stdout = String::from_utf8_lossy(&out.get_output().stdout);
+            let docs: Vec<Value> = stdout
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            let text: String = docs
+                .iter()
+                .filter(|d| d["type"] == "agent.text_delta")
+                .map(|d| d["text"].as_str().unwrap())
+                .collect();
+            let result = docs.last().unwrap();
+            assert_eq!(result["type"], "result", "{stdout}");
+            assert_eq!(result["status"], "ok", "{stdout}");
+            assert!(text.to_lowercase().contains("pong"), "{text:?}");
+            assert!(result["usage"]["input_tokens"].as_u64().unwrap() > 0);
+            assert!(result["usage"]["output_tokens"].as_u64().unwrap() > 0);
+            assert!(result["cost_usd"].as_f64().unwrap() > 0.0);
+
+            let stats = json(
+                &h.harness()
+                    .args(["--json", "stats", "tokens"])
+                    .assert()
+                    .success(),
+            );
+            assert_eq!(stats["totals"]["calls"], 1);
+            assert!(stats["totals"]["cost_usd"].as_f64().unwrap() > 0.0);
+            eprintln!(
+                "live: {text:?} usage={} cost_usd={}",
+                result["usage"], result["cost_usd"]
+            );
         });
     })
     .await

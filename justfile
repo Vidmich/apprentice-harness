@@ -42,8 +42,26 @@ fmt:
     uv run --directory ml ruff format .
     pnpm --dir apps/gui format
 
-# Build + lint + test, the same set CI runs
-check: build lint test
+# Licence, advisory and source checks on the dependency tree (deny.toml)
+deny:
+    cargo deny check
+
+# Build + lint + test + deny, the same set CI runs
+check: build lint test deny
+
+# The end-to-end tests only: real daemon and CLI binaries against wiremock
+e2e:
+    cargo test -p harnessd --test e2e_hello -- --nocapture
+
+# The #[ignore] live tests against the real API (spends tokens; needs ANTHROPIC_API_KEY)
+live:
+    cargo test -p apprentice-core --test mentor -- --ignored live
+    cargo test -p harnessd --test e2e_hello -- --ignored live
+
+# Record an SSE fixture from the real API (spends tokens): just fixtures-record NAME REQUEST.json
+# Writes crates/core/tests/fixtures/sse/NAME.txt, redacted. See CONTRIBUTING.md.
+fixtures-record NAME REQUEST:
+    uv run --project ml python scripts/record_sse.py {{NAME}} {{REQUEST}}
 
 # Run the GUI in development mode (set HARNESS_HOME for an isolated data dir)
 gui:
@@ -65,7 +83,8 @@ daemon *ARGS:
 cli *ARGS:
     cargo run -p harness -- {{ARGS}}
 
-# Install frontend and Python dependencies
+# Install frontend and Python dependencies and cargo-deny
 setup:
     pnpm --dir apps/gui install
     uv sync --directory ml
+    cargo install cargo-deny --locked
