@@ -7,7 +7,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::error::TraceError;
 
 /// `(version, sql)` in ascending order. Append only.
-const MIGRATIONS: &[(u32, &str)] = &[(1, include_str!("migrations/v001.sql"))];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, include_str!("migrations/v001.sql")),
+    (2, include_str!("migrations/v002.sql")),
+];
 
 /// Newest schema version this build understands.
 pub const SCHEMA_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -94,9 +97,54 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn).unwrap();
         assert_eq!(version(&conn).unwrap(), 0);
-        assert_eq!(migrate(&mut conn).unwrap(), vec![1]);
+        assert_eq!(migrate(&mut conn).unwrap(), vec![1, 2]);
         assert_eq!(version(&conn).unwrap(), SCHEMA_VERSION);
         assert!(migrate(&mut conn).unwrap().is_empty());
+    }
+
+    /// An M00 database (schema v1) with data in it migrates to v2 with
+    /// every row intact and `sessions.workspace_id` NULL.
+    #[test]
+    fn v1_database_migrates_without_data_loss() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&conn).unwrap();
+        {
+            let tx = conn.transaction().unwrap();
+            apply(&tx, 1, MIGRATIONS[0].1).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(version(&conn).unwrap(), 1);
+        conn.execute_batch(
+            "INSERT INTO sessions(id, created_at, updated_at, title, workspace_path, config_json)
+             VALUES ('s1', 't0', 't0', 'old', 'C:/old/repo', '{}');
+             INSERT INTO events(id, session_id, seq, ts, kind, payload_json)
+             VALUES ('e1', 's1', 1, 't0', 'session.created', '{}');
+             INSERT INTO blobs(id, size, media_type, created_at) VALUES ('b1', 3, 'text/plain', 't0');",
+        )
+        .unwrap();
+
+        assert_eq!(migrate(&mut conn).unwrap(), vec![2]);
+        assert_eq!(version(&conn).unwrap(), 2);
+        let (title, path, ws): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT title, workspace_path, workspace_id FROM sessions WHERE id = 's1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (title.as_str(), path.as_str(), ws),
+            ("old", "C:/old/repo", None)
+        );
+        let counts: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM events), (SELECT COUNT(*) FROM blobs),
+                        (SELECT COUNT(*) FROM workspaces)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (1, 1, 0));
     }
 
     #[test]

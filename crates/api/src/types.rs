@@ -62,6 +62,18 @@ pub struct SessionSummary {
     pub updated_at: String,
 }
 
+/// A registered workspace, as returned by `workspace.add` and listed by
+/// `workspace.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSummary {
+    pub id: String,
+    /// Canonical absolute root path.
+    pub root: String,
+    pub name: String,
+    pub created_at: String,
+    pub last_used_at: String,
+}
+
 /// Trace event row as listed by `trace.list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventSummary {

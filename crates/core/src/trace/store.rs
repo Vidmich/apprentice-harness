@@ -15,7 +15,7 @@ use super::error::TraceError;
 use super::payload::{SPILLED_MEDIA_TYPE, blob_refs, spill_strings};
 use super::{
     AgentId, AgentKind, BLOB_DIR, BlobId, CallId, DB_FILE, EventId, RunStatus, SessionId,
-    SessionStatus, StepId, kinds, now_ts, schema,
+    SessionStatus, StepId, WorkspaceId, kinds, now_ts, schema,
 };
 use crate::config::TraceConfig;
 
@@ -30,7 +30,11 @@ const DEFAULT_PAGE: u32 = 200;
 #[derive(Debug, Clone, Default)]
 pub struct NewSession {
     pub title: Option<String>,
+    /// The workspace root as given at creation (kept as history even
+    /// after the workspace is removed from the registry).
     pub workspace_path: Option<String>,
+    /// The registry row the session attaches to, when it has one.
+    pub workspace_id: Option<WorkspaceId>,
     /// Resolved config snapshot at creation.
     pub config: Value,
 }
@@ -178,8 +182,21 @@ pub struct SessionRecord {
     pub updated_at: String,
     pub title: Option<String>,
     pub workspace_path: Option<String>,
+    pub workspace_id: Option<WorkspaceId>,
     pub config: Value,
     pub status: SessionStatus,
+}
+
+/// A registered workspace (schema v2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRecord {
+    pub id: WorkspaceId,
+    /// Canonical absolute root path, as stored.
+    pub root: String,
+    pub name: String,
+    pub created_at: String,
+    pub last_used_at: String,
+    pub settings: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -466,15 +483,29 @@ impl TraceStore {
             serde_json::json!({
                 "title": s.title,
                 "workspace_path": s.workspace_path,
+                "workspace_id": s.workspace_id,
             }),
         ))?;
         let mut conn = self.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "INSERT INTO sessions(id, created_at, updated_at, title, workspace_path, config_json, status)
-             VALUES (?1, ?2, ?2, ?3, ?4, ?5, 'open')",
-            params![id, now, s.title, s.workspace_path, s.config.to_string()],
+            "INSERT INTO sessions(id, created_at, updated_at, title, workspace_path, workspace_id, config_json, status)
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'open')",
+            params![
+                id,
+                now,
+                s.title,
+                s.workspace_path,
+                s.workspace_id,
+                s.config.to_string()
+            ],
         )?;
+        if let Some(ws) = &s.workspace_id {
+            tx.execute(
+                "UPDATE workspaces SET last_used_at = ?2 WHERE id = ?1",
+                params![ws, now],
+            )?;
+        }
         insert_event(&tx, created)?;
         tx.commit()?;
         Ok(id)
@@ -483,7 +514,7 @@ impl TraceStore {
     pub fn get_session(&self, id: &SessionId) -> Result<SessionRecord> {
         self.lock()
             .query_row(
-                "SELECT id, created_at, updated_at, title, workspace_path, config_json, status
+                "SELECT id, created_at, updated_at, title, workspace_path, config_json, status, workspace_id
                  FROM sessions WHERE id = ?1",
                 params![id],
                 session_record,
@@ -1030,6 +1061,128 @@ impl TraceStore {
         Ok(report)
     }
 
+    // ---------------------------------------------------------- workspaces
+
+    /// Registers `root` (already canonical; see `workspace::Workspace`)
+    /// or returns the existing row for it, touching `last_used_at`.
+    /// `name` is only used for a new row; `None` means the root's file
+    /// name.
+    pub fn add_workspace(&self, root: &str, name: Option<&str>) -> Result<WorkspaceRecord> {
+        let mut conn = self.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = now_ts();
+        let existing: Option<WorkspaceId> = tx
+            .query_row(
+                "SELECT id FROM workspaces WHERE root = ?1",
+                params![root],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let id = if let Some(id) = existing {
+            tx.execute(
+                "UPDATE workspaces SET last_used_at = ?2 WHERE id = ?1",
+                params![id, now],
+            )?;
+            id
+        } else {
+            let id = WorkspaceId::generate();
+            let name = name
+                .map(str::to_owned)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| default_workspace_name(root));
+            tx.execute(
+                "INSERT INTO workspaces(id, root, name, created_at, last_used_at, settings_json)
+                 VALUES (?1, ?2, ?3, ?4, ?4, '{}')",
+                params![id, root, name, now],
+            )?;
+            id
+        };
+        let record = tx.query_row(
+            "SELECT id, root, name, created_at, last_used_at, settings_json
+             FROM workspaces WHERE id = ?1",
+            params![id],
+            workspace_record,
+        )?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn get_workspace(&self, id: &WorkspaceId) -> Result<WorkspaceRecord> {
+        self.lock()
+            .query_row(
+                "SELECT id, root, name, created_at, last_used_at, settings_json
+                 FROM workspaces WHERE id = ?1",
+                params![id],
+                workspace_record,
+            )
+            .optional()?
+            .ok_or_else(|| TraceError::not_found("workspace", id.as_str()))
+    }
+
+    /// The row whose root is exactly `root` (canonical form).
+    pub fn find_workspace(&self, root: &str) -> Result<Option<WorkspaceRecord>> {
+        Ok(self
+            .lock()
+            .query_row(
+                "SELECT id, root, name, created_at, last_used_at, settings_json
+                 FROM workspaces WHERE root = ?1",
+                params![root],
+                workspace_record,
+            )
+            .optional()?)
+    }
+
+    /// Most recently used first.
+    pub fn list_workspaces(&self) -> Result<Vec<WorkspaceRecord>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, root, name, created_at, last_used_at, settings_json
+             FROM workspaces ORDER BY last_used_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([], workspace_record)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn touch_workspace(&self, id: &WorkspaceId) -> Result<()> {
+        let n = self.lock().execute(
+            "UPDATE workspaces SET last_used_at = ?2 WHERE id = ?1",
+            params![id, now_ts()],
+        )?;
+        require_row(n, "workspace", id.as_str())
+    }
+
+    pub fn rename_workspace(&self, id: &WorkspaceId, name: &str) -> Result<()> {
+        let n = self.lock().execute(
+            "UPDATE workspaces SET name = ?2 WHERE id = ?1",
+            params![id, name],
+        )?;
+        require_row(n, "workspace", id.as_str())
+    }
+
+    pub fn set_workspace_settings(&self, id: &WorkspaceId, settings: &Value) -> Result<()> {
+        let n = self.lock().execute(
+            "UPDATE workspaces SET settings_json = ?2 WHERE id = ?1",
+            params![id, settings.to_string()],
+        )?;
+        require_row(n, "workspace", id.as_str())
+    }
+
+    /// Removes the registry row. Sessions keep their `workspace_path`
+    /// and lose the link; files and traces are untouched. Returns the
+    /// number of sessions unlinked.
+    pub fn remove_workspace(&self, id: &WorkspaceId) -> Result<u64> {
+        let mut conn = self.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let unlinked = tx.execute(
+            "UPDATE sessions SET workspace_id = NULL WHERE workspace_id = ?1",
+            params![id],
+        )?;
+        let n = tx.execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
+        require_row(n, "workspace", id.as_str())?;
+        tx.commit()?;
+        Ok(unlinked as u64)
+    }
+
     // ------------------------------------------------------- maintenance
 
     /// Verifies the database and every blob: files exist (unless pruned)
@@ -1202,6 +1355,17 @@ impl TraceStore {
 
 // ------------------------------------------------------------ SQL helpers
 
+/// The last path component of `root`, or the whole thing for a bare
+/// drive or `/`.
+fn default_workspace_name(root: &str) -> String {
+    root.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|n| !n.is_empty())
+        .unwrap_or(root)
+        .to_owned()
+}
+
 fn page(limit: Option<u32>) -> u32 {
     limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE)
 }
@@ -1258,8 +1422,20 @@ fn session_record(r: &Row<'_>) -> rusqlite::Result<SessionRecord> {
         updated_at: r.get(2)?,
         title: r.get(3)?,
         workspace_path: r.get(4)?,
+        workspace_id: r.get(7)?,
         config: parse_json(&r.get::<_, String>(5)?)?,
         status: SessionStatus::parse(&status).ok_or_else(|| bad_column("status", &status))?,
+    })
+}
+
+fn workspace_record(r: &Row<'_>) -> rusqlite::Result<WorkspaceRecord> {
+    Ok(WorkspaceRecord {
+        id: r.get(0)?,
+        root: r.get(1)?,
+        name: r.get(2)?,
+        created_at: r.get(3)?,
+        last_used_at: r.get(4)?,
+        settings: parse_json(&r.get::<_, String>(5)?)?,
     })
 }
 

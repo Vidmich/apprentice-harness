@@ -7,11 +7,12 @@ use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
     StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
-    TraceGetParams, TraceListParams,
+    TraceGetParams, TraceListParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
+    WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
     ApprenticeStats, ConfigLayer, Effort, RunOptions, StatsRange, TokenBucket, TokenStats,
-    ToolInfo, Usage,
+    ToolInfo, Usage, WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -182,6 +183,61 @@ fn tools_shape() {
                 ]
             }
         )
+    );
+}
+
+#[test]
+fn workspace_shapes() {
+    let summary = WorkspaceSummary {
+        id: "w1".into(),
+        root: r"C:\src\repo".into(),
+        name: "repo".into(),
+        created_at: "2026-09-12T10:00:00.000Z".into(),
+        last_used_at: "2026-09-12T11:00:00.000Z".into(),
+    };
+    assert_json_snapshot!(
+        "workspace_add",
+        (
+            WorkspaceAddParams {
+                root: "C:/src/repo".into(),
+                name: None
+            },
+            summary.clone()
+        )
+    );
+    assert_json_snapshot!(
+        "workspace_list",
+        WorkspaceListResult {
+            workspaces: vec![summary]
+        }
+    );
+    assert_json_snapshot!(
+        "workspace_remove",
+        (
+            WorkspaceIdParams { id: "w1".into() },
+            WorkspaceRemoveResult {
+                sessions_unlinked: 2
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "workspace_info",
+        WorkspaceInfoResult {
+            id: "w1".into(),
+            root: "/src/repo".into(),
+            name: "repo".into(),
+            created_at: "2026-09-12T10:00:00.000Z".into(),
+            last_used_at: "2026-09-12T11:00:00.000Z".into(),
+            file_count: 1234,
+            index_truncated: false,
+            index_age_s: 3,
+            git_head: Some("0123456789abcdef0123456789abcdef01234567".into()),
+            git_branch: Some("main".into()),
+            has_instructions: true,
+            has_config: false,
+            has_ignore_file: true,
+            config_overrides: vec!["mentor.effort".into()],
+        }
     );
 }
 

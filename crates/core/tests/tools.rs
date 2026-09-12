@@ -172,6 +172,7 @@ impl Harness {
             .create_session(&NewSession {
                 title: Some("tools".into()),
                 workspace_path: None,
+                workspace_id: None,
                 config: json!({}),
             })
             .unwrap();

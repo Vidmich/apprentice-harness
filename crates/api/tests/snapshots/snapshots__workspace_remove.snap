@@ -1,0 +1,12 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(WorkspaceIdParams { id: \"w1\".into() }, WorkspaceRemoveResult\n{ sessions_unlinked: 2 })"
+---
+[
+  {
+    "id": "w1"
+  },
+  {
+    "sessions_unlinked": 2
+  }
+]

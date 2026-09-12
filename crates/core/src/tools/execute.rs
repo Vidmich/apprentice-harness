@@ -9,7 +9,6 @@
 //! result the mentor can react to, and every call — however it ended —
 //! leaves its two events in the trace.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,6 +29,7 @@ use super::{
 use crate::config::ToolsConfig;
 use crate::mentor::ContentBlock;
 use crate::trace::{BlobId, EventId, StepRef, TraceError, TraceWriter, kinds, sha256_hex};
+use crate::workspace::Workspace;
 
 /// A `tool_use` block as the mentor sent it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,7 +138,7 @@ pub struct Executor<'a> {
     config: &'a ToolsConfig,
     at: StepRef,
     cancel: CancellationToken,
-    workspace: Option<Arc<PathBuf>>,
+    workspace: Option<Arc<Workspace>>,
     progress: mpsc::Sender<ToolProgress>,
 }
 
@@ -178,8 +178,8 @@ impl<'a> Executor<'a> {
     }
 
     #[must_use]
-    pub fn with_workspace(mut self, root: Option<PathBuf>) -> Self {
-        self.workspace = root.map(Arc::new);
+    pub fn with_workspace(mut self, workspace: Option<Arc<Workspace>>) -> Self {
+        self.workspace = workspace;
         self
     }
 

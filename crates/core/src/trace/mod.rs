@@ -33,7 +33,7 @@ pub use schema::SCHEMA_VERSION;
 pub use store::{
     AgentRecord, BlobInput, BlobMeta, CallFilter, DiskUsage, EventQuery, GroupBy, GroupedTotals,
     IntegrityReport, MAX_PAGE, MentorCallEnd, MentorCallRow, MentorCallStart, NewAgent, NewEvent,
-    NewSession, RepriceReport, SessionRecord, StepRecord, TraceStore, UsageTotals,
+    NewSession, RepriceReport, SessionRecord, StepRecord, TraceStore, UsageTotals, WorkspaceRecord,
 };
 pub use writer::{MAX_BATCH, QUEUE_CAPACITY, TraceWriter};
 
@@ -190,6 +190,10 @@ generated_id!(
     /// Id of one mentor call, shared by its request/response/error events
     /// and the `mentor_calls` row.
     CallId
+);
+generated_id!(
+    /// Id of a registered workspace (`workspaces` row, schema v2).
+    WorkspaceId
 );
 id_type!(
     /// SHA-256 hex of the blob content.

@@ -14,6 +14,9 @@ import {
   KNOWN_EVENT_TYPES,
   type TokenStats,
   type ToolsListResult,
+  type WorkspaceAddParams,
+  type WorkspaceInfoResult,
+  type WorkspaceSummary,
   asKnown,
   eventShapeError,
   isEventNotification,
@@ -99,8 +102,19 @@ describe("api.ts against the Rust snapshots", () => {
     ]);
   });
 
+  it("reads workspace info", () => {
+    const info = snapshot("workspace_info") as WorkspaceInfoResult;
+    expect(info.file_count).toBe(1234);
+    expect(info.git_branch).toBe("main");
+    expect(info.index_truncated).toBeUndefined();
+    expect(info.config_overrides).toEqual(["mentor.effort"]);
+    const [params, added] = snapshot("workspace_add") as [WorkspaceAddParams, WorkspaceSummary];
+    expect(params.root).toBe("C:/src/repo");
+    expect(added.id).toBe("w1");
+  });
+
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(18);
+    expect(ALL_METHODS.length).toBe(23);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

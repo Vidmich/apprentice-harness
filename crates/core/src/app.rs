@@ -1,7 +1,7 @@
 //! State shared by everything one daemon process hosts (task M00-08):
 //! paths, the config loader, the trace store and its writer, the secret
-//! store, the lazily built mentor, the agent registry, the tool registry
-//! and the shutdown token. RPC handlers are thin adapters over it; [`AppState::register`]
+//! store, the lazily built mentor, the agent registry, the tool registry,
+//! the workspace registry and the shutdown token. RPC handlers are thin adapters over it; [`AppState::register`]
 //! wires all of them.
 
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ use crate::secrets::{ChainStore, SecretError, api_key_name};
 use crate::stats::StatsService;
 use crate::tools::{ToolRegistry, ToolsService};
 use crate::trace::{NewSession, SessionStatus, TraceError, TraceService, TraceStore, TraceWriter};
+use crate::workspace::{WorkspaceService, Workspaces};
 
 /// Errors from opening the state or building the mentor.
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +59,7 @@ pub struct AppState {
     mentor: Mutex<Option<Arc<dyn Mentor>>>,
     agents: AgentRegistry,
     tools: Arc<ToolRegistry>,
+    workspaces: Arc<Workspaces>,
     shutdown: CancellationToken,
 }
 
@@ -77,6 +79,7 @@ impl std::fmt::Debug for AppState {
             )
             .field("agents_running", &self.agents.running())
             .field("tools", &self.tools.len())
+            .field("workspaces_open", &self.workspaces.open_count())
             .field("shutting_down", &self.shutdown.is_cancelled())
             .finish_non_exhaustive()
     }
@@ -104,6 +107,7 @@ impl AppState {
         let store = Arc::new(TraceStore::open_with(paths, &config.trace)?);
         let writer = TraceWriter::spawn(Arc::clone(&store));
         let secrets = secret_store(paths, config.daemon.secret_store);
+        let workspaces = Arc::new(Workspaces::new(Arc::clone(&store)));
         Ok(Arc::new(Self {
             loader,
             store,
@@ -112,6 +116,7 @@ impl AppState {
             mentor: Mutex::new(None),
             agents: AgentRegistry::new(),
             tools: Arc::new(ToolRegistry::new()),
+            workspaces,
             shutdown: CancellationToken::new(),
         }))
     }
@@ -151,6 +156,11 @@ impl AppState {
     /// them (the built-in set arrives with M01-03..06).
     pub fn tools(&self) -> &Arc<ToolRegistry> {
         &self.tools
+    }
+
+    /// The workspace registry and its open handles.
+    pub fn workspaces(&self) -> &Arc<Workspaces> {
+        &self.workspaces
     }
 
     /// The current user-level config, read fresh (the loader is cheap and
@@ -210,19 +220,27 @@ impl AppState {
     }
 
     /// `session.create`: a new session carrying a snapshot of the config
-    /// resolved for its workspace.
+    /// resolved for its workspace. A workspace is registered (or found)
+    /// on the way, so the session links to a registry row and the path
+    /// stored is the canonical root.
     ///
     /// # Errors
-    /// Invalid config for that workspace, or store failure.
+    /// The workspace is not a directory, invalid config for it, or
+    /// store failure.
     pub async fn session_create(
         &self,
         p: &SessionCreateParams,
     ) -> Result<SessionCreateResult, RpcError> {
-        let workspace = p.workspace.as_deref().map(std::path::Path::new);
-        let config = self.loader.load(workspace)?.tree;
+        let workspace = p
+            .workspace
+            .as_deref()
+            .map(|root| self.workspaces.add(std::path::Path::new(root), None))
+            .transpose()?;
+        let config = self.loader.load(workspace.as_ref().map(|w| w.root()))?.tree;
         let session = NewSession {
             title: p.title.clone(),
-            workspace_path: p.workspace.clone(),
+            workspace_path: workspace.as_ref().map(|w| w.root_string()),
+            workspace_id: workspace.and_then(|w| w.id().cloned()),
             config,
         };
         let id = self
@@ -235,8 +253,8 @@ impl AppState {
     }
 
     /// Registers every core handler: `config.*`, `auth.*`, `session.*`,
-    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`. `daemon.*` is the
-    /// host's.
+    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`, `workspace.*`.
+    /// `daemon.*` is the host's.
     pub fn register(self: &Arc<Self>, router: &mut Router) {
         crate::runtime::rpc::register(self, router);
         let state = Arc::clone(self);
@@ -251,6 +269,11 @@ impl AppState {
         .register(router);
         Arc::new(ToolsService::new(
             Arc::clone(&self.tools),
+            self.loader.clone(),
+        ))
+        .register(router);
+        Arc::new(WorkspaceService::new(
+            Arc::clone(&self.workspaces),
             self.loader.clone(),
         ))
         .register(router);
@@ -307,7 +330,36 @@ mod tests {
             .unwrap();
         let record = state.store().get_session(&r.session_id.into()).unwrap();
         assert_eq!(record.title.as_deref(), Some("t"));
+        assert_eq!(record.workspace_id, None);
         assert_eq!(state.sessions_open().unwrap(), 1);
+
+        // A workspace path registers the workspace and links the session.
+        let ws_dir = dir.path().join("repo");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        let r = state
+            .session_create(&SessionCreateParams {
+                workspace: Some(ws_dir.to_string_lossy().into_owned()),
+                title: None,
+            })
+            .await
+            .unwrap();
+        let record = state.store().get_session(&r.session_id.into()).unwrap();
+        let ws_id = record.workspace_id.expect("linked");
+        let ws = state.workspaces().get(&ws_id).unwrap();
+        assert_eq!(
+            record.workspace_path.as_deref(),
+            Some(ws.root_string().as_str())
+        );
+        assert_eq!(state.workspaces().list().unwrap().len(), 1);
+
+        let err = state
+            .session_create(&SessionCreateParams {
+                workspace: Some(dir.path().join("missing").to_string_lossy().into_owned()),
+                title: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("workspace root"), "{err}");
         state.close().await;
     }
 
@@ -358,6 +410,11 @@ mod tests {
                 "tools.list",
                 "trace.get",
                 "trace.list",
+                "workspace.add",
+                "workspace.info",
+                "workspace.list",
+                "workspace.refresh",
+                "workspace.remove",
             ]
         );
         state.close().await;

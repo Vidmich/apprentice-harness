@@ -281,6 +281,45 @@ export interface ToolsListResult {
   tools: ToolInfo[];
 }
 
+// ---------------------------------------------------------------- workspace.*
+
+export interface WorkspaceSummary {
+  id: string;
+  root: string;
+  name: string;
+  created_at: string;
+  last_used_at: string;
+}
+
+export interface WorkspaceAddParams {
+  root: string;
+  name?: string;
+}
+
+export interface WorkspaceListResult {
+  workspaces: WorkspaceSummary[];
+}
+
+export interface WorkspaceIdParams {
+  id: string;
+}
+
+export interface WorkspaceRemoveResult {
+  sessions_unlinked: number;
+}
+
+export interface WorkspaceInfoResult extends WorkspaceSummary {
+  file_count: number;
+  index_truncated?: boolean;
+  index_age_s: number;
+  git_head?: string;
+  git_branch?: string;
+  has_instructions: boolean;
+  has_config: boolean;
+  has_ignore_file: boolean;
+  config_overrides?: string[];
+}
+
 /** Every method: wire name → { params, result }. */
 export interface Methods {
   "daemon.hello": { params: HelloParams; result: HelloResult };
@@ -301,6 +340,11 @@ export interface Methods {
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
   "tools.list": { params: ToolsListParams; result: ToolsListResult };
+  "workspace.add": { params: WorkspaceAddParams; result: WorkspaceSummary };
+  "workspace.list": { params: Empty; result: WorkspaceListResult };
+  "workspace.remove": { params: WorkspaceIdParams; result: WorkspaceRemoveResult };
+  "workspace.info": { params: WorkspaceIdParams; result: WorkspaceInfoResult };
+  "workspace.refresh": { params: WorkspaceIdParams; result: WorkspaceInfoResult };
 }
 
 export type MethodName = keyof Methods;
@@ -329,6 +373,11 @@ export const ALL_METHODS: readonly MethodName[] = [
   "stats.tokens",
   "stats.reprice",
   "tools.list",
+  "workspace.add",
+  "workspace.list",
+  "workspace.remove",
+  "workspace.info",
+  "workspace.refresh",
 ];
 
 // ---------------------------------------------------------------- events

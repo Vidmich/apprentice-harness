@@ -26,7 +26,6 @@ pub(crate) mod rpc;
 mod schema;
 
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,6 +44,7 @@ pub use schema::{ToolValidator, is_valid_name};
 
 use crate::config::ToolsConfig;
 use crate::trace::{AgentId, SessionId};
+use crate::workspace::Workspace;
 
 /// Longest `summary` line; longer ones are cut by the executor.
 pub const MAX_SUMMARY_CHARS: usize = 120;
@@ -180,9 +180,9 @@ impl Default for ToolEnv {
 /// `tool_use` id.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
-    /// Root of the session's workspace, when it has one. Becomes the
-    /// `Workspace` of M01-02 (path sandbox, ignore rules, index).
-    pub workspace: Option<Arc<PathBuf>>,
+    /// The session's workspace (path sandbox, ignore rules, index), when
+    /// it has one. Tools resolve every path through it.
+    pub workspace: Option<Arc<Workspace>>,
     pub session_id: SessionId,
     pub agent_id: AgentId,
     pub call_id: String,

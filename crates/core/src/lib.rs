@@ -12,6 +12,7 @@ pub mod secrets;
 pub mod stats;
 pub mod tools;
 pub mod trace;
+pub mod workspace;
 
 /// Logging setup, shared with the CLI and GUI through `apprentice-common`.
 pub use apprentice_common::telemetry;

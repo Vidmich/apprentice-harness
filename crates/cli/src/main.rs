@@ -16,6 +16,7 @@ mod session;
 mod stats;
 mod tools;
 mod trace;
+mod workspace;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -129,6 +130,9 @@ enum Command {
     /// The tools the mentor can call.
     #[command(subcommand)]
     Tools(tools::ToolsCommand),
+    /// Registered workspace roots.
+    #[command(subcommand, visible_alias = "ws")]
+    Workspace(workspace::WorkspaceCommand),
     /// Print environment, paths, versions, daemon and hardware facts for bug reports.
     Doctor,
     /// Print a shell completion script
@@ -241,6 +245,7 @@ fn run(cli: Cli, out: Out) -> anyhow::Result<()> {
         Command::Trace(cmd) => trace::run(&ctx, &cmd),
         Command::Stats(cmd) => stats::run(&ctx, &cmd),
         Command::Tools(cmd) => tools::run(&ctx, &cmd),
+        Command::Workspace(cmd) => workspace::run(&ctx, &cmd),
         Command::Doctor => doctor::run(&ctx.paths, log.ok().as_ref(), ctx.out.json),
         Command::Completions { .. } => unreachable!("handled above"),
     }
@@ -347,6 +352,26 @@ mod tests {
             c.command,
             Command::Tools(tools::ToolsCommand::List(_))
         ));
+    }
+
+    #[test]
+    fn workspace_commands_parse() {
+        let c = Cli::try_parse_from(["harness", "workspace", "add", ".", "--name", "x"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Workspace(workspace::WorkspaceCommand::Add(_))
+        ));
+        let c = Cli::try_parse_from(["harness", "ws", "info"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Workspace(workspace::WorkspaceCommand::Info(_))
+        ));
+        let c = Cli::try_parse_from(["harness", "ws", "remove", "id1"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Workspace(workspace::WorkspaceCommand::Remove(_))
+        ));
+        assert!(Cli::try_parse_from(["harness", "ws", "remove"]).is_err());
     }
 
     #[test]

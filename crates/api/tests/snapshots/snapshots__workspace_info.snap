@@ -1,0 +1,21 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "WorkspaceInfoResult\n{\n    id: \"w1\".into(), root: \"/src/repo\".into(), name: \"repo\".into(),\n    created_at: \"2026-09-12T10:00:00.000Z\".into(), last_used_at:\n    \"2026-09-12T11:00:00.000Z\".into(), file_count: 1234, index_truncated:\n    false, index_age_s: 3, git_head:\n    Some(\"0123456789abcdef0123456789abcdef01234567\".into()), git_branch:\n    Some(\"main\".into()), has_instructions: true, has_config: false,\n    has_ignore_file: true, config_overrides: vec![\"mentor.effort\".into()],\n}"
+---
+{
+  "id": "w1",
+  "root": "/src/repo",
+  "name": "repo",
+  "created_at": "2026-09-12T10:00:00.000Z",
+  "last_used_at": "2026-09-12T11:00:00.000Z",
+  "file_count": 1234,
+  "index_age_s": 3,
+  "git_head": "0123456789abcdef0123456789abcdef01234567",
+  "git_branch": "main",
+  "has_instructions": true,
+  "has_config": false,
+  "has_ignore_file": true,
+  "config_overrides": [
+    "mentor.effort"
+  ]
+}

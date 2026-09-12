@@ -37,6 +37,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 sha2 = "0.11"
 # tools
 jsonschema = { version = "0.56", default-features = false }
+ignore = "0.4"
 # ipc
 interprocess = { version = "2.4", features = ["tokio"] }
 # cli / logging

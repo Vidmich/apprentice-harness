@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::types::{
     ConfigLayer, ConfigSource, EventSummary, RunOptions, SessionSummary, TokenStats, ToolInfo,
-    TraceEvent,
+    TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -370,6 +370,97 @@ pub struct ToolsListResult {
 
 method!(ToolsList, "tools.list", ToolsListParams, ToolsListResult);
 
+// ------------------------------------------------------------- workspace.*
+
+/// `workspace.add`: registers a root directory (idempotent: the same
+/// root returns the same id) and marks it used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceAddParams {
+    /// Absolute path of the root; canonicalised by the daemon.
+    pub root: String,
+    /// Display name for a new row (default: the directory name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+method!(
+    WorkspaceAdd,
+    "workspace.add",
+    WorkspaceAddParams,
+    WorkspaceSummary
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceListResult {
+    /// Most recently used first.
+    pub workspaces: Vec<WorkspaceSummary>,
+}
+
+method!(WorkspaceList, "workspace.list", Empty, WorkspaceListResult);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceIdParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceRemoveResult {
+    /// Sessions that pointed at the row and now only keep their
+    /// historical `workspace` path.
+    pub sessions_unlinked: u64,
+}
+
+method!(
+    /// Forgets a workspace. Files and traces are untouched.
+    WorkspaceRemove, "workspace.remove", WorkspaceIdParams, WorkspaceRemoveResult
+);
+
+/// `workspace.info` / `workspace.refresh`: the registry row plus what
+/// the daemon knows about the tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)] // wire shape: independent facts, not a state machine
+pub struct WorkspaceInfoResult {
+    pub id: String,
+    pub root: String,
+    pub name: String,
+    pub created_at: String,
+    pub last_used_at: String,
+    /// Files in the index (ignore rules applied).
+    pub file_count: u64,
+    /// The tree has more files than the index holds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub index_truncated: bool,
+    /// Seconds since the index was built.
+    pub index_age_s: u64,
+    /// Commit hash of `HEAD` when the root is a git work tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_head: Option<String>,
+    /// Checked-out branch, when `HEAD` is symbolic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// `.harness/HARNESS.md` exists.
+    pub has_instructions: bool,
+    /// `.harness/config.toml` exists.
+    pub has_config: bool,
+    /// `.harness/ignore` exists.
+    pub has_ignore_file: bool,
+    /// Dotted config keys the workspace config layer overrides.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_overrides: Vec<String>,
+}
+
+method!(
+    WorkspaceInfo,
+    "workspace.info",
+    WorkspaceIdParams,
+    WorkspaceInfoResult
+);
+
+method!(
+    /// Re-reads `.harness/ignore` and rebuilds the file index now.
+    WorkspaceRefresh, "workspace.refresh", WorkspaceIdParams, WorkspaceInfoResult
+);
+
 /// Every method name known to this API version, for parity checks and
 /// documentation.
 pub const ALL_METHODS: &[&str] = &[
@@ -391,6 +482,11 @@ pub const ALL_METHODS: &[&str] = &[
     StatsTokens::NAME,
     StatsReprice::NAME,
     ToolsList::NAME,
+    WorkspaceAdd::NAME,
+    WorkspaceList::NAME,
+    WorkspaceRemove::NAME,
+    WorkspaceInfo::NAME,
+    WorkspaceRefresh::NAME,
 ];
 
 #[cfg(test)]

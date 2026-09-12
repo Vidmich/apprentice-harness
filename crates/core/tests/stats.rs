@@ -53,6 +53,7 @@ fn session(store: &TraceStore, title: &str) -> SessionId {
         .create_session(&NewSession {
             title: Some(title.into()),
             workspace_path: None,
+            workspace_id: None,
             config: json!({}),
         })
         .unwrap()

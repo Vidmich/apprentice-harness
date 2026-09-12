@@ -46,6 +46,7 @@ fn session(store: &TraceStore) -> SessionId {
         .create_session(&NewSession {
             title: Some("t".into()),
             workspace_path: None,
+            workspace_id: None,
             config: json!({"mentor": {"model": "claude-opus-5"}}),
         })
         .unwrap()
