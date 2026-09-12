@@ -35,6 +35,7 @@ rustfmt.toml                     edition = "2024", max_width = 100
 clippy.toml / [workspace.lints]  clippy::all + pedantic (selected) as warn; deny(unsafe_code) in all crates except future llama binding
 crates/core/     apprentice-core    lib apprentice_core
 crates/api/      apprentice-api     lib apprentice_api
+crates/common/   apprentice-common  lib apprentice_common   (added in M00-04: paths + telemetry)
 crates/client/   apprentice-client  lib apprentice_client
 crates/daemon/   harnessd           bin harnessd
 crates/cli/      harness            bin harness
@@ -51,8 +52,9 @@ field left as `LicenseRef-TBD` (licence is a deferred decision).
 so all members use one version.
 
 Crate dependency direction (enforced by review, keep acyclic):
-`api` ← `client` ← `cli`, `gui`; `api` ← `core` ← `daemon`. `cli` and `gui`
-must NOT depend on `core` (they must never link inference libraries).
+`api` ← `client` ← `cli`, `gui`; `api` ← `core` ← `daemon`; `common` ← `client`,
+`core`, `cli`, `gui`. `cli` and `gui` must NOT depend on `core` (they must
+never link inference libraries).
 
 Each lib crate exposes `pub const VERSION: &str = env!("CARGO_PKG_VERSION");`
 and has one unit test. Each bin prints `<name> <version>` for `--version`.

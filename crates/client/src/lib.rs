@@ -2,8 +2,10 @@
 //!
 //! [`DaemonClient`] speaks the `apprentice-api` protocol over any
 //! `AsyncRead`/`AsyncWrite` pair: request/response with typed methods,
-//! and per-subscription event streams. Daemon discovery and spawning are
-//! added in M00-08 (`discover` module).
+//! and per-subscription event streams. [`discovery`] reads `daemon.json`;
+//! connecting by discovery and spawning the daemon arrive with M00-08.
+
+pub mod discovery;
 
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
@@ -22,6 +24,8 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::{debug, warn};
+
+pub use discovery::{DAEMON_INFO_FILE, DaemonInfo, DiscoveryError};
 
 /// Crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

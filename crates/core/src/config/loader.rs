@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use super::error::ConfigError;
 use super::keypath;
-use super::paths::Paths;
 use super::schema::{Config, ENV_OVERRIDES, WORKSPACE_OVERRIDABLE, workspace_overridable};
+use apprentice_common::paths::Paths;
 
 /// Where a value came from (re-export of the wire enum).
 pub type Source = ConfigSource;

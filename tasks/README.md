@@ -50,6 +50,7 @@ These were decided in SPEC.md and during planning; tasks assume them.
   Cargo.toml                 Rust workspace
   crates/core/               lib  apprentice_core   — runtime, tools, mentor, traces, inference, eval
   crates/api/                lib  apprentice_api    — JSON-RPC method/event types shared by daemon and clients
+  crates/common/             lib  apprentice_common — paths + logging setup shared by every process (no core)
   crates/client/             lib  apprentice_client — daemon discovery/spawn + typed RPC client (CLI, GUI)
   crates/daemon/             bin  harnessd          — hosts core, serves the RPC API
   crates/cli/                bin  harness           — CLI

@@ -14,14 +14,13 @@ mod edit;
 mod error;
 mod keypath;
 mod loader;
-mod paths;
 mod rpc;
 mod schema;
 
+pub use apprentice_common::paths::{APP_NAME, HOME_ENV, NoHomeDir, Paths};
 pub use edit::set;
 pub use error::ConfigError;
 pub use loader::{ConfigLoader, Resolved, Source};
-pub use paths::{APP_NAME, HOME_ENV, NoHomeDir, Paths};
 pub use rpc::{ConfigService, PROVIDERS};
 pub use schema::{
     ApprenticeConfig, Config, DaemonConfig, ENV_OVERRIDES, MentorConfig, PermissionsConfig,

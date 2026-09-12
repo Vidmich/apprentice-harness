@@ -14,7 +14,7 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinSet;
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, warn};
 
 use crate::API_VERSION;
 use crate::codec::{Frame, read_frame, write_message};
@@ -299,8 +299,10 @@ impl Router {
         };
 
         let conn = Arc::clone(conn);
+        let span = tracing::info_span!("rpc", method = %method, id = ?id, conn = conn.id);
         tasks.spawn(async move {
-            let inner = tokio::spawn(handler(Arc::clone(&conn), params));
+            let started = std::time::Instant::now();
+            let inner = tokio::spawn(handler(Arc::clone(&conn), params).instrument(span.clone()));
             let outcome = match inner.await {
                 Ok(r) => r,
                 Err(e) if e.is_panic() => {
@@ -309,9 +311,16 @@ impl Router {
                 }
                 Err(_) => Err(RpcError::cancelled()),
             };
+            let elapsed_ms = started.elapsed().as_millis();
             let response = match outcome {
-                Ok(v) => Response::success(id, v),
-                Err(e) => Response::failure(Some(id), e),
+                Ok(v) => {
+                    span.in_scope(|| debug!(elapsed_ms, "ok"));
+                    Response::success(id, v)
+                }
+                Err(e) => {
+                    span.in_scope(|| debug!(elapsed_ms, code = e.code, kind = e.kind(), "error"));
+                    Response::failure(Some(id), e)
+                }
             };
             conn.respond(response).await;
         });

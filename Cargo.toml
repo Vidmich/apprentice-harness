@@ -44,6 +44,7 @@ tracing-appender = "0.2"
 # platform
 directories = "6.0"
 keyring = "4.2"
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
 # errors / ids / time
 thiserror = "2.0"
 anyhow = "1.0"
@@ -53,11 +54,13 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde", "macros"
 wiremock = "0.6"
 insta = { version = "1.48", features = ["json"] }
 assert_cmd = "2.2"
+predicates = "3.1"
 tempfile = "3.27"
 # internal crates
 apprentice-core = { path = "crates/core" }
 apprentice-api = { path = "crates/api" }
 apprentice-client = { path = "crates/client" }
+apprentice-common = { path = "crates/common" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

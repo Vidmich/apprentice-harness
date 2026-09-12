@@ -10,7 +10,7 @@ use toml_edit::{DocumentMut, Item};
 use super::error::ConfigError;
 use super::keypath;
 use super::loader::{Source, validate_layer_text};
-use super::paths::Paths;
+use apprentice_common::paths::Paths;
 
 /// Sets (or, with `Value::Null`, removes) a dotted key in the user or
 /// workspace file. An object value replaces the whole sub-table (used for

@@ -7,6 +7,9 @@
 pub mod config;
 pub mod secrets;
 
+/// Logging setup, shared with the CLI and GUI through `apprentice-common`.
+pub use apprentice_common::telemetry;
+
 /// Crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

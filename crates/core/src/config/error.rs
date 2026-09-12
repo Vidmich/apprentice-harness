@@ -61,7 +61,7 @@ pub enum ConfigError {
     BadEnv { var: String },
 
     #[error(transparent)]
-    NoHomeDir(#[from] super::paths::NoHomeDir),
+    NoHomeDir(#[from] apprentice_common::paths::NoHomeDir),
 }
 
 impl ConfigError {

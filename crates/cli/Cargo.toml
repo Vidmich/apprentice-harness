@@ -12,9 +12,22 @@ name = "harness"
 path = "src/main.rs"
 
 [dependencies]
-apprentice-client = { workspace = true }
 apprentice-api = { workspace = true }
+apprentice-client = { workspace = true }
+apprentice-common = { workspace = true }
 anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sysinfo = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

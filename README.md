@@ -14,6 +14,7 @@ model stays short and token-cheap — without lowering task success.
 ```
 crates/core      apprentice_core   runtime, tools, mentor adapter, traces, inference
 crates/api       apprentice_api    JSON-RPC types shared by daemon and clients
+crates/common    apprentice_common paths and logging setup shared by every process
 crates/client    apprentice_client daemon discovery/spawn + typed RPC client
 crates/daemon    harnessd          hosts the core, serves the RPC API
 crates/cli       harness           command line interface

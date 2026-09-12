@@ -12,7 +12,7 @@ name = "apprentice_core"
 
 [dependencies]
 apprentice-api = { workspace = true }
-directories = { workspace = true }
+apprentice-common = { workspace = true }
 keyring = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
