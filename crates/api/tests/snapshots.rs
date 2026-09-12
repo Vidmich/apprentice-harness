@@ -182,6 +182,7 @@ fn event_shapes() {
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 900,
             },
+            cost_usd: Some(0.0138),
         },
         Event::AgentFinished {
             agent_id: "a1".into(),

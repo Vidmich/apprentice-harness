@@ -38,7 +38,10 @@ sha2 = "0.11"
 # ipc
 interprocess = { version = "2.4", features = ["tokio"] }
 # cli / logging
-clap = { version = "4.6", features = ["derive", "env"] }
+clap = { version = "4.6", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.6"
+owo-colors = "4.4"
+rpassword = "7.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 tracing-appender = "0.2"

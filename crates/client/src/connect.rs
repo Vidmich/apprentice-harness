@@ -388,6 +388,7 @@ fn spawn_detached(
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        stop_inheriting_std_handles();
     }
     #[cfg(unix)]
     {
@@ -399,6 +400,35 @@ fn spawn_detached(
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Marks this process's stdio handles non-inheritable. A child gets every
+/// inheritable handle of its parent (`CreateProcess` is called with
+/// `bInheritHandles = TRUE` for the stdio it is given), so without this
+/// the daemon would hold the pipes a shell or a test gave *us* and
+/// `$(harness session new)` would wait for EOF until the daemon exits.
+/// Later children that inherit our stdio still work: the standard library
+/// duplicates the handle as inheritable for them.
+#[cfg(windows)]
+#[allow(
+    unsafe_code,
+    reason = "SetHandleInformation has no safe wrapper; called on this process's own std handles"
+)]
+fn stop_inheriting_std_handles() {
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    for handle in [
+        std::io::stdin().as_raw_handle(),
+        std::io::stdout().as_raw_handle(),
+        std::io::stderr().as_raw_handle(),
+    ] {
+        if handle.is_null() {
+            continue;
+        }
+        // SAFETY: `handle` is a valid handle owned by this process for as
+        // long as the process lives; the call only changes its flags.
+        unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+    }
 }
 
 #[cfg(test)]

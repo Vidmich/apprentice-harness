@@ -90,6 +90,10 @@ pub enum Event {
         agent_id: String,
         call_id: String,
         usage: Usage,
+        /// Cost of this call from the daemon's pricing table; absent when
+        /// the model has no entry.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost_usd: Option<f64>,
     },
     #[serde(rename = "agent.finished")]
     AgentFinished {

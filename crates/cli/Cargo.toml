@@ -17,9 +17,14 @@ apprentice-client = { workspace = true }
 apprentice-common = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
+owo-colors = { workspace = true }
+rpassword = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sysinfo = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
@@ -28,6 +33,9 @@ assert_cmd = { workspace = true }
 predicates = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true

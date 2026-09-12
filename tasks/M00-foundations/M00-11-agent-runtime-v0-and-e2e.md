@@ -111,6 +111,13 @@ should treat running agents as activity (`Server::idle_for` in
 shutdown with an in-flight mentor call records `agent.finished{cancelled}`
 and flushes queued events" is tested here.
 
+M00-09 shipped `harness run` against a mock router (`crates/cli/tests/run.rs`
+shows the event script it expects). The CLI reads the per-call cost from the
+optional `cost_usd` field of `agent.usage` (added in M00-09, `None` when the
+model has no pricing entry): fill it when emitting the event. The M00-09
+acceptance item "the trace shows `agent.finished{cancelled}` after CTRL-C" is
+asserted by the cancellation E2E here.
+
 ## Acceptance
 
 - [ ] E2E test (`crates/daemon/tests/e2e_hello.rs`): start daemon with temp

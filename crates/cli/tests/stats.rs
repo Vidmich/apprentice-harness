@@ -40,9 +40,9 @@ fn bucket(key: Option<&str>, label: Option<&str>) -> TokenBucket {
 fn without_daemon_the_command_fails_with_a_hint() {
     let home = tempfile::tempdir().unwrap();
     harness(home.path())
-        .args(["stats", "tokens"])
+        .args(["--no-spawn", "stats", "tokens"])
         .assert()
-        .code(2)
+        .code(3)
         .stderr(predicates::str::contains("no daemon is running"));
 }
 

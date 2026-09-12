@@ -6,9 +6,9 @@ use std::fmt::Write as _;
 
 use apprentice_api::methods::{StatsReprice, StatsRepriceParams, StatsTokens, StatsTokensParams};
 use apprentice_api::types::{TokenBucket, TokenStats};
-use apprentice_common::paths::Paths;
 use clap::{Args, Subcommand, ValueEnum};
 
+use crate::Ctx;
 use crate::daemon::with_client;
 
 #[derive(Debug, Subcommand)]
@@ -56,7 +56,8 @@ pub enum By {
     Session,
 }
 
-pub fn run(paths: &Paths, cmd: &StatsCommand, json: bool) -> anyhow::Result<()> {
+pub fn run(ctx: &Ctx, cmd: &StatsCommand) -> anyhow::Result<()> {
+    let json = ctx.out.json;
     match cmd {
         StatsCommand::Tokens(a) => {
             let params = StatsTokensParams {
@@ -64,9 +65,10 @@ pub fn run(paths: &Paths, cmd: &StatsCommand, json: bool) -> anyhow::Result<()> 
                 until: a.until.clone(),
                 session_id: a.session.clone(),
             };
-            let stats = with_client(paths, |c| async move {
-                Ok(c.call::<StatsTokens>(params).await?)
-            })?;
+            let stats = with_client(
+                ctx,
+                |c| async move { Ok(c.call::<StatsTokens>(params).await?) },
+            )?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&stats)?);
             } else {
@@ -85,9 +87,10 @@ pub fn run(paths: &Paths, cmd: &StatsCommand, json: bool) -> anyhow::Result<()> 
                 until: a.until.clone(),
                 session_id: a.session.clone(),
             };
-            let r = with_client(paths, |c| async move {
-                Ok(c.call::<StatsReprice>(params).await?)
-            })?;
+            let r = with_client(
+                ctx,
+                |c| async move { Ok(c.call::<StatsReprice>(params).await?) },
+            )?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&r)?);
             } else {

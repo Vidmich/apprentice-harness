@@ -1,34 +1,85 @@
-//! `harness` — the apprentice-harness CLI.
+//! `harness` — the apprentice-harness CLI (task M00-09).
 //!
-//! M00-04: global flags, logging and `doctor`. The rest of the command tree
-//! arrives with M00-09. This binary must never depend on `apprentice-core`.
+//! A thin client: every command talks to `harnessd` over the local socket
+//! and this binary must never depend on `apprentice-core`. Global flags
+//! come first or last (`harness --json doctor` and `harness doctor --json`
+//! both work); `--json` prints exactly one JSON document per command
+//! (NDJSON for `run`) with human messages on stderr.
 
+mod auth;
+mod config;
 mod daemon;
 mod doctor;
+mod out;
+mod run;
+mod session;
 mod stats;
+mod trace;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
+use apprentice_client::{ClientError, ClientOptions, ConnectError};
 use apprentice_common::paths::Paths;
 use apprentice_common::telemetry;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+
+use crate::out::Out;
 
 const NAME: &str = "harness";
 
-/// Exit codes (task M00-09).
-mod exit {
+/// Exit codes.
+pub mod exit {
     pub const OK: i32 = 0;
+    /// Bad arguments.
+    pub const USAGE: i32 = 1;
+    /// The command ran and failed.
     pub const COMMAND_FAILED: i32 = 2;
+    /// No daemon could be reached or started.
+    pub const DAEMON_UNAVAILABLE: i32 = 3;
+    /// The daemon refused us: wrong token or incompatible API.
+    pub const UNAUTHORIZED: i32 = 4;
+    /// CTRL-C.
+    pub const INTERRUPTED: i32 = 130;
 }
 
+/// Errors that map to an exit code other than "command failed".
+#[derive(Debug, thiserror::Error)]
+pub enum Exit {
+    #[error("interrupted")]
+    Interrupted,
+    #[error("{0}")]
+    Usage(String),
+}
+
+const AFTER_HELP: &str = "\
+Exit codes:
+  0  ok                     3  no daemon could be reached or started
+  1  bad arguments          4  daemon refused us (token, API version)
+  2  command failed       130  interrupted
+
+Examples:
+  harness run \"explain the failing test\"      # new session in the current directory
+  harness session list --limit 5
+  harness config set mentor.model claude-opus-5
+  harness --json trace list --kind agent.finished";
+
 #[derive(Debug, Parser)]
-#[command(name = NAME, version = apprentice_client::VERSION, about = "apprentice-harness CLI")]
+#[command(
+    name = NAME,
+    bin_name = NAME,
+    version = apprentice_client::VERSION,
+    about = "apprentice-harness CLI: run and inspect mentor/apprentice sessions",
+    after_help = AFTER_HELP,
+    subcommand_required = true,
+    arg_required_else_help = true
+)]
 struct Cli {
     /// Put config and data under this directory (same as `HARNESS_HOME`).
     #[arg(long, global = true, value_name = "DIR", env = "HARNESS_HOME")]
     home: Option<PathBuf>,
 
-    /// Print machine-readable JSON instead of text.
+    /// Print machine-readable JSON on stdout (NDJSON for `run`).
     #[arg(long, global = true)]
     json: bool,
 
@@ -40,32 +91,113 @@ struct Cli {
     #[arg(long, global = true, value_name = "LEVEL")]
     log_level: Option<String>,
 
+    /// Fail (exit 3) instead of starting a daemon when none is running.
+    #[arg(long, global = true)]
+    no_spawn: bool,
+
+    /// Seconds to wait for each daemon reply (0 = forever).
+    #[arg(long, global = true, value_name = "S", default_value_t = 60)]
+    timeout: u64,
+
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Print environment, paths, versions, daemon and hardware facts for bug reports.
-    Doctor,
-    /// Token usage and cost (M00-07).
+    /// Start, stop or inspect the background daemon.
+    #[command(subcommand)]
+    Daemon(daemon::DaemonCommand),
+    /// Read and write configuration.
+    #[command(subcommand)]
+    Config(config::ConfigCommand),
+    /// Provider API keys.
+    #[command(subcommand)]
+    Auth(auth::AuthCommand),
+    /// Sessions group agent runs on one workspace.
+    #[command(subcommand, visible_alias = "s")]
+    Session(session::SessionCommand),
+    /// Run one prompt through the mentor and stream the answer.
+    Run(run::RunArgs),
+    /// Inspect the trace store.
+    #[command(subcommand)]
+    Trace(trace::TraceCommand),
+    /// Token usage and cost.
     #[command(subcommand)]
     Stats(stats::StatsCommand),
+    /// Print environment, paths, versions, daemon and hardware facts for bug reports.
+    Doctor,
+    /// Print a shell completion script
+    ///
+    /// bash:        harness completions bash > ~/.local/share/bash-completion/completions/harness
+    /// zsh:         harness completions zsh > "${fpath[1]}/_harness"
+    /// fish:        harness completions fish > ~/.config/fish/completions/harness.fish
+    /// powershell:  harness completions powershell >> $PROFILE
+    #[command(verbatim_doc_comment)]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+}
+
+/// What every command needs: paths, output conventions, and how to reach
+/// the daemon.
+#[derive(Debug)]
+pub struct Ctx {
+    pub paths: Paths,
+    /// `--home` as given by the user (not the platform default), passed on
+    /// to a spawned daemon.
+    pub home: Option<PathBuf>,
+    pub out: Out,
+    pub no_spawn: bool,
+    pub log_level: Option<String>,
+    /// Per-request timeout; `None` = forever.
+    pub timeout: Option<Duration>,
+}
+
+impl Ctx {
+    pub fn client_options(&self) -> ClientOptions {
+        ClientOptions {
+            timeout: self.timeout,
+            ..ClientOptions::default()
+        }
+    }
 }
 
 fn main() {
-    let cli = Cli::parse();
-    let code = match run(&cli) {
-        Ok(()) => exit::OK,
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
         Err(e) => {
-            eprintln!("error: {e:#}");
-            exit::COMMAND_FAILED
+            // `--help` / `--version` go to stdout and are not errors.
+            let code = if e.use_stderr() {
+                exit::USAGE
+            } else {
+                exit::OK
+            };
+            let _ = e.print();
+            std::process::exit(code);
         }
     };
+    let out = Out::new(cli.json, cli.quiet);
+    let code = match run(cli, out) {
+        Ok(()) => exit::OK,
+        Err(e) => {
+            out.report_error(&e);
+            code_for(&e)
+        }
+    };
+    out::flush();
     std::process::exit(code);
 }
 
-fn run(cli: &Cli) -> anyhow::Result<()> {
+fn run(cli: Cli, out: Out) -> anyhow::Result<()> {
+    if let Command::Completions { shell } = cli.command {
+        clap_complete::generate(shell, &mut Cli::command(), NAME, &mut std::io::stdout());
+        return Ok(());
+    }
+
+    // `cli.home` is set by `--home` or `HARNESS_HOME`, never by the
+    // platform default, so it is safe to hand to a spawned daemon.
     let paths = match &cli.home {
         Some(home) => Paths::from_home(home),
         None => Paths::discover()?,
@@ -77,43 +209,107 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         None,
     );
     // Logging is best effort for the CLI: an unwritable data dir must not
-    // stop `doctor` from reporting exactly that.
+    // stop `doctor` from reporting exactly that. Log lines reach stderr
+    // only when a level was asked for; the file gets them regardless.
+    let explicit_level = cli.log_level.is_some() || telemetry::level_from_env().is_some();
     let log = telemetry::init(
-        &telemetry::Options::new("cli", level, paths.data_dir.join("logs")).stderr(!cli.quiet),
+        &telemetry::Options::new("cli", level, paths.data_dir.join("logs"))
+            .stderr(explicit_level && !cli.quiet),
     );
     if let Err(e) = &log {
-        if !cli.quiet {
-            eprintln!("warning: logging disabled: {e}");
-        }
+        out.info(format!("warning: logging disabled: {e}"));
     }
 
-    match &cli.command {
-        Command::Doctor => doctor::run(&paths, log.ok().as_ref(), cli.json),
-        Command::Stats(cmd) => stats::run(&paths, cmd, cli.json),
+    let ctx = Ctx {
+        paths,
+        home: cli.home.clone(),
+        out,
+        no_spawn: cli.no_spawn,
+        log_level: cli.log_level.clone(),
+        timeout: (cli.timeout > 0).then(|| Duration::from_secs(cli.timeout)),
+    };
+    match cli.command {
+        Command::Daemon(cmd) => daemon::run(&ctx, &cmd),
+        Command::Config(cmd) => config::run(&ctx, &cmd),
+        Command::Auth(cmd) => auth::run(&ctx, &cmd),
+        Command::Session(cmd) => session::run(&ctx, &cmd),
+        Command::Run(args) => run::run(&ctx, &args),
+        Command::Trace(cmd) => trace::run(&ctx, &cmd),
+        Command::Stats(cmd) => stats::run(&ctx, &cmd),
+        Command::Doctor => doctor::run(&ctx.paths, log.ok().as_ref(), ctx.out.json),
+        Command::Completions { .. } => unreachable!("handled above"),
+    }
+}
+
+/// Maps an error to the exit-code contract.
+fn code_for(e: &anyhow::Error) -> i32 {
+    for cause in e.chain() {
+        if let Some(x) = cause.downcast_ref::<Exit>() {
+            return match x {
+                Exit::Interrupted => exit::INTERRUPTED,
+                Exit::Usage(_) => exit::USAGE,
+            };
+        }
+        if let Some(c) = cause.downcast_ref::<ConnectError>() {
+            return match c {
+                ConnectError::Incompatible { .. } => exit::UNAUTHORIZED,
+                ConnectError::Client(inner) => code_for_client(inner),
+                ConnectError::Discovery(_)
+                | ConnectError::NotRunning { .. }
+                | ConnectError::DaemonNotFound { .. }
+                | ConnectError::Spawn { .. }
+                | ConnectError::DaemonExited { .. }
+                | ConnectError::SpawnTimeout { .. } => exit::DAEMON_UNAVAILABLE,
+            };
+        }
+        if let Some(c) = cause.downcast_ref::<ClientError>() {
+            return code_for_client(c);
+        }
+    }
+    exit::COMMAND_FAILED
+}
+
+fn code_for_client(e: &ClientError) -> i32 {
+    match e {
+        ClientError::Rpc(r) if matches!(r.kind(), Some("unauthorized" | "incompatible_api")) => {
+            exit::UNAUTHORIZED
+        }
+        ClientError::Closed | ClientError::Io(_) => exit::DAEMON_UNAVAILABLE,
+        ClientError::Rpc(_) | ClientError::Protocol(_) | ClientError::Timeout(_) => {
+            exit::COMMAND_FAILED
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use apprentice_api::jsonrpc::RpcError;
     use clap::Parser;
 
     #[test]
     fn name_is_stable() {
-        assert_eq!(super::NAME, "harness");
+        assert_eq!(NAME, "harness");
+        Cli::command().debug_assert();
     }
 
     #[test]
-    fn global_flags_parse_after_the_subcommand() {
-        let c = super::Cli::try_parse_from(["harness", "doctor", "--json", "--log-level", "debug"])
-            .unwrap();
+    fn global_flags_parse_before_or_after_the_subcommand() {
+        let c =
+            Cli::try_parse_from(["harness", "doctor", "--json", "--log-level", "debug"]).unwrap();
         assert!(c.json);
         assert_eq!(c.log_level.as_deref(), Some("debug"));
-        assert!(matches!(c.command, super::Command::Doctor));
+        assert!(matches!(c.command, Command::Doctor));
+        let c = Cli::try_parse_from(["harness", "--no-spawn", "--timeout", "5", "session", "list"])
+            .unwrap();
+        assert!(c.no_spawn);
+        assert_eq!(c.timeout, 5);
+        assert!(matches!(c.command, Command::Session(_)));
     }
 
     #[test]
     fn stats_tokens_flags_parse() {
-        let c = super::Cli::try_parse_from([
+        let c = Cli::try_parse_from([
             "harness",
             "stats",
             "tokens",
@@ -129,13 +325,49 @@ mod tests {
         .unwrap();
         assert!(matches!(
             c.command,
-            super::Command::Stats(super::stats::StatsCommand::Tokens(_))
+            Command::Stats(stats::StatsCommand::Tokens(_))
         ));
-        let c =
-            super::Cli::try_parse_from(["harness", "stats", "reprice", "--model", "m"]).unwrap();
+        let c = Cli::try_parse_from(["harness", "stats", "reprice", "--model", "m"]).unwrap();
         assert!(matches!(
             c.command,
-            super::Command::Stats(super::stats::StatsCommand::Reprice(_))
+            Command::Stats(stats::StatsCommand::Reprice(_))
         ));
+    }
+
+    #[test]
+    fn run_session_and_workspace_conflict() {
+        let e = Cli::try_parse_from(["harness", "run", "hi", "--session", "s", "--workspace", "."])
+            .unwrap_err();
+        assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn exit_codes_follow_the_contract() {
+        let not_running: anyhow::Error = ConnectError::NotRunning {
+            info_file: PathBuf::from("x"),
+            state: "not found",
+        }
+        .into();
+        assert_eq!(code_for(&not_running), exit::DAEMON_UNAVAILABLE);
+        assert_eq!(
+            code_for(&not_running.context("listing sessions")),
+            exit::DAEMON_UNAVAILABLE
+        );
+        let incompatible: anyhow::Error = ConnectError::Incompatible {
+            client_api: 2,
+            daemon_api: 3,
+            hint: "update",
+        }
+        .into();
+        assert_eq!(code_for(&incompatible), exit::UNAUTHORIZED);
+        let unauthorized: anyhow::Error =
+            ConnectError::Client(ClientError::Rpc(RpcError::unauthorized("bad token"))).into();
+        assert_eq!(code_for(&unauthorized), exit::UNAUTHORIZED);
+        let not_found: anyhow::Error = ClientError::Rpc(RpcError::not_found("nope")).into();
+        assert_eq!(code_for(&not_found), exit::COMMAND_FAILED);
+        let closed: anyhow::Error = ClientError::Closed.into();
+        assert_eq!(code_for(&closed), exit::DAEMON_UNAVAILABLE);
+        assert_eq!(code_for(&Exit::Interrupted.into()), exit::INTERRUPTED);
+        assert_eq!(code_for(&anyhow::anyhow!("other")), exit::COMMAND_FAILED);
     }
 }
