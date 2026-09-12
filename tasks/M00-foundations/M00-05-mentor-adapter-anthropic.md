@@ -1,6 +1,6 @@
 # M00-05 — Mentor adapter: Anthropic Messages API
 
-Status: todo
+Status: done
 Depends on: M00-01, M00-03
 Size: L
 
@@ -142,15 +142,15 @@ Maps to RPC codes -32020/-32021 in the daemon.
 
 ## Acceptance
 
-- [ ] Against a `wiremock` server replaying recorded SSE fixtures: text-only
+- [x] Against a `wiremock` server replaying recorded SSE fixtures: text-only
       response, response with two tool_use blocks (parallel), response with
       thinking blocks, `max_tokens` stop, `refusal` with `stop_details`,
       error event mid-stream, 429 then success, 529 then success, 401.
-- [ ] Usage assembled exactly from fixtures, including cache fields.
-- [ ] `count_tokens` works against the mock.
-- [ ] Cancellation mid-stream returns `Cancelled` within 100 ms and drops the
+- [x] Usage assembled exactly from fixtures, including cache fields.
+- [x] `count_tokens` works against the mock.
+- [x] Cancellation mid-stream returns `Cancelled` within 100 ms and drops the
       connection.
-- [ ] Serialised request JSON for a sample request matches a snapshot that a
+- [x] Serialised request JSON for a sample request matches a snapshot that a
       reviewer has checked against the API docs (system array, tools with
       cache_control, adaptive thinking, output_config.effort, no prefill).
 - [ ] One `#[ignore]` live test (`HARNESS_LIVE=1`) performs a real call with
@@ -168,3 +168,43 @@ manually with a real key.
 - The adapter must not know about sessions, traces or tools' execution — only
   the wire protocol. That keeps it swappable for an OpenAI-compatible adapter
   in M10.
+
+## Completion notes (2026-09-12)
+
+- `apprentice_core::mentor`: `types` (wire types; `Role` includes `System`
+  for mid-conversation system messages, needed by M03-08; `CacheFlag`
+  flattens to `cache_control: {type: "ephemeral"}`; `ContentBlock` and
+  `StopReason` have untagged fallbacks so newer API additions pass through),
+  `sse` (in-house parser, chunk-boundary safe), `assemble` (block assembly,
+  cumulative usage, `stop_details`), `anthropic` (`AnthropicMentor`:
+  streaming over `reqwest` 0.13/rustls, retries with jittered exponential
+  backoff capped at 60 s and honouring `retry-after`, cancellation via
+  `CancellationToken` at both the request and every chunk, `count_tokens`),
+  `error` (`MentorError` → RPC -32020/-32021/-32030 with
+  `details {reason, http_status, api_error_type | retry_after_ms}`).
+- Retry policy as specified: only before any content block started. An
+  abrupt close before content is `Disconnected` (retryable, even though
+  hyper reports it as a decode error); after content it is
+  `StreamInterrupted { partial }`, including an SSE `error` event after
+  content. `AnthropicMentor::with_max_backoff` caps delays (tests use 20 ms).
+- `http_client(config)`: overall timeout from `mentor.timeout_s`, 90 s read
+  timeout (the API pings while thinking), 10 s connect timeout,
+  `apprentice-harness/<version>` user agent.
+- Fixtures under `crates/core/tests/fixtures/sse/` are hand-written to the
+  documented event shapes (not recorded from the API); the live test is
+  what validates the real stream. Snapshot
+  `tests/snapshots/mentor__messages_request.snap` was reviewed against the
+  docs: system array with `cache_control`, tools with `cache_control`,
+  `thinking {adaptive, display}`, `output_config.effort`, `stream: true`,
+  thinking blocks echoed with `signature`, `tool_result` blocks, a
+  `role: "system"` message, `metadata.user_id`, no assistant prefill.
+- Tests: 16 unit (types, SSE, assembler, status mapping) + 13 integration
+  (`crates/core/tests/mentor.rs`: text, parallel tool_use, thinking +
+  redacted_thinking, cached usage, max_tokens, refusal with stop_details,
+  error event before/after content, 429 + 529 then success, 401/400 not
+  retried, rate-limit RPC mapping, count_tokens body, raw SSE capture,
+  snapshot, cancellation mid-stream, disconnect before/after content over a
+  raw socket server).
+- Not run here: the `#[ignore]` live test (`HARNESS_LIVE=1
+  ANTHROPIC_API_KEY=... cargo test -p apprentice-core --test mentor --
+  --ignored live`) — it spends real tokens.

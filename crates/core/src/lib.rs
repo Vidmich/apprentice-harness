@@ -5,6 +5,7 @@
 //! `apprentice-api` protocol; they never link this crate.
 
 pub mod config;
+pub mod mentor;
 pub mod secrets;
 
 /// Logging setup, shared with the CLI and GUI through `apprentice-common`.
