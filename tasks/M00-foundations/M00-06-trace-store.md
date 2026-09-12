@@ -1,6 +1,6 @@
 # M00-06 â€” Trace store (SQLite + content-addressed blobs)
 
-Status: todo
+Status: done
 Depends on: M00-01, M00-03
 Size: M
 
@@ -174,3 +174,38 @@ Unit + integration tests under `crates/core/tests/trace_*.rs` with a temp
   local store is the user's own data.
 - `mentor_calls` duplicates some payload data on purpose: stats and replay
   selection must not require JSON parsing of every event.
+
+## Completion notes (2026-09-12)
+
+- Module `apprentice_core::trace`: `store.rs` (`TraceStore`, write + query
+  API), `schema.rs` (embedded `migrations/v001.sql`, version in
+  `schema_meta`, refuses newer schemas), `blobs.rs` (`BlobFiles`, temp file +
+  rename, no per-file fsync), `payload.rs` (oversized strings become
+  `{"$blob": id, "bytes": n}`; `blob_refs` finds them), `record.rs`
+  (`record_mentor_request/response/error` build the documented payloads and
+  keep `mentor_calls` in step, one transaction each), `writer.rs`
+  (`TraceWriter`: dedicated thread, bounded queue of 10k, consecutive
+  appends share a transaction with a savepoint per event), `rpc.rs`
+  (`TraceService` registers `session.list`, `trace.list`, `trace.get`;
+  `session.create` is left to the runtime, which snapshots the config).
+- Typed ids (`SessionId`, `AgentId`, `StepId`, `EventId`, `CallId` — UUID v7;
+  `BlobId` — sha256 hex) implement `ToSql`/`FromSql`; timestamps are fixed
+  width `YYYY-MM-DDTHH:MM:SS.mmmZ` so string order is time order.
+- Schema additions over the sketch: `blobs.pruned_at` (retention removes
+  the file, keeps the row; `integrity_check` skips pruned blobs),
+  `events_blob`, `sessions_updated`, `agents_session`,
+  `mentor_calls_session` indexes; `mentor_calls.status` also has `running`.
+- Kinds are validated as `name` or `area.name` (lower-case); `kinds::ALL`
+  lists v1 including the reserved `apprentice.state` and `feedback`.
+- `list_events` always returns ascending `seq`; `before_seq` selects the
+  newest `limit` rows below it (backwards paging for the GUI).
+- Throughput on the reference machine (Windows 11, NTFS): one transaction
+  per event is commit-bound at ~200 µs (10k in ~2 s); through the writer,
+  where queued appends share a transaction, 10k appends from 8 tasks take
+  ~1.0–1.3 s. Both timings are `#[ignore]`d tests in
+  `crates/core/tests/trace_store.rs` (`--ignored`). Blob files cost ~2.5 ms
+  each (NTFS create + rename), fine per tool call / mentor call.
+- Python: `apprentice_ml.traces` (stdlib `sqlite3`, read-only URI open,
+  refuses newer schemas) and `apprentice-ml traces stats --db <path>
+  [--json]`; `ml/tests/test_traces.py` builds a database from
+  `crates/core/src/trace/migrations/v001.sql`.

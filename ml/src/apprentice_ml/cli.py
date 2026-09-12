@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from dataclasses import asdict
 
-from apprentice_ml import __version__
+from apprentice_ml import __version__, traces
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -13,7 +15,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="apprentice-ml", description="apprentice-harness ML tooling"
     )
     parser.add_argument("--version", action="version", version=f"apprentice-ml {__version__}")
-    parser.add_subparsers(dest="command", help="subcommands are added by later milestones")
+    sub = parser.add_subparsers(dest="command")
+
+    traces_cmd = sub.add_parser("traces", help="inspect a harness trace store")
+    traces_sub = traces_cmd.add_subparsers(dest="traces_command", required=True)
+    stats_cmd = traces_sub.add_parser("stats", help="print counts per table and event kind")
+    stats_cmd.add_argument("--db", required=True, help="path to traces.sqlite")
+    stats_cmd.add_argument("--json", action="store_true", help="machine-readable output")
     return parser
 
 
@@ -23,7 +31,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
-    return 0
+    if args.command == "traces" and args.traces_command == "stats":
+        try:
+            s = traces.stats(args.db)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps(asdict(s), indent=2) if args.json else traces.format_stats(s))
+        return 0
+    parser.error(f"unknown command {args.command}")
+    return 2
 
 
 if __name__ == "__main__":
