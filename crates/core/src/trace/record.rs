@@ -70,6 +70,7 @@ impl TraceStore {
             model: req.model.clone(),
             effort,
             request_bytes: Some(body.len() as u64),
+            started_at: None,
         };
         self.append_with_call(ev, &call)
     }

@@ -1,6 +1,6 @@
 # M00-07 — Token accounting and cost
 
-Status: todo
+Status: done
 Depends on: M00-03, M00-06
 Size: S
 
@@ -76,14 +76,14 @@ history honest after a pricing correction.)
 
 ## Acceptance
 
-- [ ] Unit test: known usage × known pricing → exact micros (including
+- [x] Unit test: known usage × known pricing → exact micros (including
       rounding, and NULL for an unpriced model).
-- [ ] Integration: three recorded calls across two days and two models →
+- [x] Integration: three recorded calls across two days and two models →
       totals, by_model and by_day sums match hand-computed values.
-- [ ] `stats.tokens` filtered by session returns only that session.
-- [ ] `harness stats tokens --json` output validates against the
+- [x] `stats.tokens` filtered by session returns only that session.
+- [x] `harness stats tokens --json` output validates against the
       `TokenStats` type (round-trip through serde).
-- [ ] `reprice` updates only the selected rows and is idempotent.
+- [x] `reprice` updates only the selected rows and is idempotent.
 
 ## Verification
 
@@ -96,3 +96,39 @@ history honest after a pricing correction.)
   apprentice appear in M03 and are labelled as estimates.
 - Default cache pricing in config is an assumption (10% read, 125% write of
   input); verify on the pricing page and correct the defaults.
+
+## Completion notes (2026-09-12)
+
+- `crates/core/src/stats/`: `cost.rs` (`cost_micros(usage, pricing)`,
+  `price_call(model, usage, &PriceTable) -> Option<i64>`, `micros_to_usd`),
+  `range.rs` (`parse_bound`: ages `30m/12h/7d/2w`, bare dates in the local
+  offset — `--until <date>` includes that day — and RFC 3339; `format_offset`),
+  `rpc.rs` (`StatsService::new(store, ConfigLoader)` /
+  `with_pricing(store, table)` / `with_offset(tz)`, `tokens()`, `reprice()`,
+  `register(router)`; `token_stats(store, &CallFilter, offset)` builds the
+  wire type).
+- Store additions: `TraceStore::stats_by(&CallFilter, GroupBy::{Model, Day{offset_secs}, Session})`
+  (session groups carry the title as `label`, ordered by cost desc),
+  `local_offset_secs()` (SQLite `localtime`, so DST follows the OS),
+  `reprice(&CallFilter, &dyn Fn(model, &Usage) -> Option<i64>) -> RepriceReport`
+  (one `BEGIN IMMEDIATE` tx; only rows whose value differs are written, so it is
+  idempotent). `MentorCallStart.started_at: Option<String>` (`None` = now) lets
+  imports and tests pin the call time. `call_where` now qualifies columns
+  with the `c` alias.
+- Bounds are parsed in the daemon, not the CLI, so the GUI gets the same
+  grammar; `range.since/until` echo the resolved UTC timestamps and `tz` is
+  the offset used for `by_day` (`+HH:MM`; the OS local offset at query time).
+- API: added `stats.reprice` (`StatsRepriceParams{model,since,until,session_id}`
+  → `StatsRepriceResult{examined,changed,unpriced}`), additive so
+  `API_VERSION` stays 1.
+- CLI: `harness stats tokens [--since] [--until] [--session] [--by model|day|session]...`
+  and `harness stats reprice [--model] [--since] [--until] [--session]`, both
+  honouring the global `--json`. Connection goes through
+  `crates/cli/src/daemon.rs::with_client` (discovery only; auto-start is
+  M00-08/09). Tests: `crates/core/tests/stats.rs` (6), `crates/cli/tests/stats.rs`
+  (fake router on a real socket), unit tests in `stats::cost`, `stats::range`
+  and the CLI formatter.
+- Not done here: the default cache prices (10 % read, 125 % write of input,
+  i.e. the 5-minute cache) were not re-verified against the pricing page;
+  1-hour cache writes (2× input) are not modelled — a `[pricing.<model>]`
+  override covers it until the API reports the cache TTL in `usage`.

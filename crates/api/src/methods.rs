@@ -306,6 +306,37 @@ pub struct StatsTokensParams {
 
 method!(StatsTokens, "stats.tokens", StatsTokensParams, TokenStats);
 
+/// Recomputes `cost_micros` of stored mentor calls from the current pricing
+/// table. All filters are optional; times compare against the call start.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StatsRepriceParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StatsRepriceResult {
+    /// Completed calls with usage that matched the filter.
+    pub examined: u64,
+    /// Rows whose stored cost differed from the recomputed one.
+    pub changed: u64,
+    /// Matching calls whose model has no pricing entry (cost left `NULL`).
+    pub unpriced: u64,
+}
+
+method!(
+    StatsReprice,
+    "stats.reprice",
+    StatsRepriceParams,
+    StatsRepriceResult
+);
+
 /// Every method name known to this API version, for parity checks and
 /// documentation.
 pub const ALL_METHODS: &[&str] = &[
@@ -325,6 +356,7 @@ pub const ALL_METHODS: &[&str] = &[
     TraceList::NAME,
     TraceGet::NAME,
     StatsTokens::NAME,
+    StatsReprice::NAME,
 ];
 
 #[cfg(test)]

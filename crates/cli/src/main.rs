@@ -3,7 +3,9 @@
 //! M00-04: global flags, logging and `doctor`. The rest of the command tree
 //! arrives with M00-09. This binary must never depend on `apprentice-core`.
 
+mod daemon;
 mod doctor;
+mod stats;
 
 use std::path::PathBuf;
 
@@ -46,6 +48,9 @@ struct Cli {
 enum Command {
     /// Print environment, paths, versions, daemon and hardware facts for bug reports.
     Doctor,
+    /// Token usage and cost (M00-07).
+    #[command(subcommand)]
+    Stats(stats::StatsCommand),
 }
 
 fn main() {
@@ -84,6 +89,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
 
     match &cli.command {
         Command::Doctor => doctor::run(&paths, log.ok().as_ref(), cli.json),
+        Command::Stats(cmd) => stats::run(&paths, cmd, cli.json),
     }
 }
 
@@ -103,5 +109,33 @@ mod tests {
         assert!(c.json);
         assert_eq!(c.log_level.as_deref(), Some("debug"));
         assert!(matches!(c.command, super::Command::Doctor));
+    }
+
+    #[test]
+    fn stats_tokens_flags_parse() {
+        let c = super::Cli::try_parse_from([
+            "harness",
+            "stats",
+            "tokens",
+            "--since",
+            "7d",
+            "--by",
+            "day",
+            "--by",
+            "session",
+            "--session",
+            "abc",
+        ])
+        .unwrap();
+        assert!(matches!(
+            c.command,
+            super::Command::Stats(super::stats::StatsCommand::Tokens(_))
+        ));
+        let c =
+            super::Cli::try_parse_from(["harness", "stats", "reprice", "--model", "m"]).unwrap();
+        assert!(matches!(
+            c.command,
+            super::Command::Stats(super::stats::StatsCommand::Reprice(_))
+        ));
     }
 }

@@ -78,9 +78,11 @@ executable" rule finds it.
 ### RPC handlers wired here
 
 `daemon.hello/status/shutdown`, `config.get/set/path`, `auth.set_key/status`,
-`session.create/list`, `trace.list/get`, `stats.tokens` — each a thin adapter
-from API params to core calls with error mapping. `agent.run/cancel` are
-wired in M00-11.
+`session.create/list`, `trace.list/get`, `stats.tokens/reprice` — each a thin
+adapter from API params to core calls with error mapping. `agent.run/cancel`
+are wired in M00-11. M00-03/06/07 already ship `ConfigService`,
+`TraceService` and `StatsService` with `register(router)`; `StatsService::new`
+takes the `ConfigLoader` so `[pricing]` edits apply without a restart.
 
 Concurrency: each connection is a task; handlers run on the tokio runtime;
 the trace store is shared via `Arc`; core state in `AppState`

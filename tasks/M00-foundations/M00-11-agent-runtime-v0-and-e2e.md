@@ -77,7 +77,8 @@ step = trace.start_step(agent)
 call_id = uuid7
 trace.append(mentor.request{...}, blob=body)      ; trace.record_mentor_call(started)
   (M00-06 ships these as one call each: `record_mentor_request(at, call_id, &req, &body)`,
-   `record_mentor_response(at, call_id, &resp, cost_micros)`, `record_mentor_error(at, call_id, &err, retry_no, final)`)
+   `record_mentor_response(at, call_id, &resp, cost_micros)`, `record_mentor_error(at, call_id, &err, retry_no, final)`;
+   `cost_micros = stats::price_call(&resp.model, &resp.usage, &config.pricing)` from M00-07)
 resp = mentor.complete(req, |ev| forward(ev), cancel)
   on TextDelta      → events.send(agent.text_delta)
   on ThinkingDelta  → events.send(agent.thinking_delta)

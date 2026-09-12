@@ -6,7 +6,7 @@ use apprentice_api::events::{AgentStatus, Event, EventNotification, LogLevel, Ri
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
-    StatsTokensParams, TraceGetParams, TraceListParams,
+    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, TraceGetParams, TraceListParams,
 };
 use apprentice_api::types::{
     ApprenticeStats, ConfigLayer, Effort, RunOptions, StatsRange, TokenBucket, TokenStats, Usage,
@@ -127,6 +127,21 @@ fn stats_shape() {
             by_session: vec![],
             apprentice: ApprenticeStats::default(),
         }
+    );
+    assert_json_snapshot!(
+        "stats_reprice",
+        (
+            StatsRepriceParams {
+                model: Some("claude-opus-5".into()),
+                since: Some("7d".into()),
+                ..StatsRepriceParams::default()
+            },
+            StatsRepriceResult {
+                examined: 4,
+                changed: 2,
+                unpriced: 1
+            }
+        )
     );
 }
 

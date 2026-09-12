@@ -134,6 +134,8 @@ pub struct MentorCallStart {
     pub model: String,
     pub effort: Option<String>,
     pub request_bytes: Option<u64>,
+    /// Store timestamp; `None` = now. Set by imports and tests.
+    pub started_at: Option<String>,
 }
 
 /// Update of `mentor_calls` when a call ends.
@@ -293,6 +295,37 @@ pub struct UsageTotals {
     pub cost_micros: i64,
     /// Completed calls whose model had no pricing entry.
     pub unpriced_calls: u64,
+}
+
+/// Grouping for [`TraceStore::stats_by`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupBy {
+    /// Key = model id.
+    Model,
+    /// Key = `YYYY-MM-DD` of the call start shifted by this many seconds
+    /// (the caller's local offset).
+    Day { offset_secs: i32 },
+    /// Key = session id, label = session title.
+    Session,
+}
+
+/// One group of [`TraceStore::stats_by`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupedTotals {
+    pub key: String,
+    pub label: Option<String>,
+    pub totals: UsageTotals,
+}
+
+/// Outcome of [`TraceStore::reprice`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RepriceReport {
+    /// Completed calls with usage that matched the filter.
+    pub examined: u64,
+    /// Rows whose stored cost differed from the recomputed one.
+    pub changed: u64,
+    /// Matching calls the pricer could not price (cost set to `NULL`).
+    pub unpriced: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -844,7 +877,7 @@ impl TraceStore {
                     COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_creation_tokens), 0),
                     COALESCE(SUM(cost_micros), 0),
                     COALESCE(SUM(CASE WHEN status = 'ok' AND cost_micros IS NULL THEN 1 ELSE 0 END), 0)
-             FROM mentor_calls WHERE {where_sql}"
+             FROM mentor_calls c WHERE {where_sql}"
         );
         let conn = self.lock();
         Ok(conn.query_row(&sql, rusqlite::params_from_iter(args), |r| {
@@ -858,6 +891,133 @@ impl TraceStore {
                 unpriced_calls: get_u64(r, 6)?,
             })
         })?)
+    }
+
+    /// Token and cost sums per group. Model and day groups are ordered by
+    /// key; session groups by cost (highest first), then key.
+    pub fn stats_by(&self, f: &CallFilter, group: GroupBy) -> Result<Vec<GroupedTotals>> {
+        let (where_sql, args) = call_where(f);
+        let (key_expr, label_expr, from, order) = match group {
+            GroupBy::Model => ("c.model", "NULL", "mentor_calls c", "1"),
+            GroupBy::Day { offset_secs } => {
+                // `date()` accepts the `...Z` timestamps written by `now_ts`.
+                let expr = format!("date(c.started_at, '{offset_secs:+} seconds')");
+                return self.grouped(&where_sql, args, &expr, "NULL", "mentor_calls c", "1");
+            }
+            GroupBy::Session => (
+                "c.session_id",
+                "s.title",
+                "mentor_calls c LEFT JOIN sessions s ON s.id = c.session_id",
+                "6 DESC, 1",
+            ),
+        };
+        self.grouped(&where_sql, args, key_expr, label_expr, from, order)
+    }
+
+    fn grouped(
+        &self,
+        where_sql: &str,
+        args: SqlArgs,
+        key_expr: &str,
+        label_expr: &str,
+        from: &str,
+        order: &str,
+    ) -> Result<Vec<GroupedTotals>> {
+        let sql = format!(
+            "SELECT {key_expr} AS k, {label_expr},
+                    COUNT(*), COALESCE(SUM(c.input_tokens), 0), COALESCE(SUM(c.output_tokens), 0),
+                    COALESCE(SUM(c.cost_micros), 0),
+                    COALESCE(SUM(c.cache_read_tokens), 0), COALESCE(SUM(c.cache_creation_tokens), 0),
+                    COALESCE(SUM(CASE WHEN c.status = 'ok' AND c.cost_micros IS NULL THEN 1 ELSE 0 END), 0)
+             FROM {from} WHERE {where_sql} GROUP BY k ORDER BY {order}"
+        );
+        let conn = self.lock();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+            Ok(GroupedTotals {
+                key: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                label: r.get(1)?,
+                totals: UsageTotals {
+                    calls: get_u64(r, 2)?,
+                    input_tokens: get_u64(r, 3)?,
+                    output_tokens: get_u64(r, 4)?,
+                    cost_micros: r.get(5)?,
+                    cache_read_tokens: get_u64(r, 6)?,
+                    cache_creation_tokens: get_u64(r, 7)?,
+                    unpriced_calls: get_u64(r, 8)?,
+                },
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Current offset of the OS local timezone from UTC, in seconds (via
+    /// SQLite's `localtime`, which follows the OS rules including DST).
+    pub fn local_offset_secs(&self) -> Result<i32> {
+        let secs: i64 = self.lock().query_row(
+            "SELECT CAST(strftime('%s', 'now', 'localtime') AS INTEGER) - CAST(strftime('%s', 'now') AS INTEGER)",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(i32::try_from(secs).unwrap_or(0))
+    }
+
+    /// Recomputes `cost_micros` of every completed call with usage that
+    /// matches `f`, using `price(model, usage)`; rows already holding the
+    /// recomputed value are left untouched, so a second run changes nothing.
+    pub fn reprice(
+        &self,
+        f: &CallFilter,
+        price: &dyn Fn(&str, &Usage) -> Option<i64>,
+    ) -> Result<RepriceReport> {
+        let (where_sql, args) = call_where(f);
+        let sql = format!(
+            "SELECT id, model, input_tokens, output_tokens, cache_read_tokens,
+                    cache_creation_tokens, cost_micros
+             FROM mentor_calls c WHERE {where_sql} AND input_tokens IS NOT NULL"
+        );
+        let mut conn = self.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut report = RepriceReport::default();
+        let updates: Vec<(CallId, Option<i64>)> = {
+            let mut stmt = tx.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+                let usage = Usage {
+                    input_tokens: get_u64(r, 2)?,
+                    output_tokens: get_u64(r, 3)?,
+                    cache_read_input_tokens: get_u64(r, 4)?,
+                    cache_creation_input_tokens: get_u64(r, 5)?,
+                };
+                Ok((
+                    r.get::<_, CallId>(0)?,
+                    r.get::<_, String>(1)?,
+                    usage,
+                    r.get::<_, Option<i64>>(6)?,
+                ))
+            })?;
+            let mut updates = Vec::new();
+            for row in rows {
+                let (id, model, usage, stored) = row?;
+                report.examined += 1;
+                let fresh = price(&model, &usage);
+                if fresh.is_none() {
+                    report.unpriced += 1;
+                }
+                if fresh != stored {
+                    updates.push((id, fresh));
+                }
+            }
+            updates
+        };
+        {
+            let mut stmt = tx.prepare("UPDATE mentor_calls SET cost_micros = ?2 WHERE id = ?1")?;
+            for (id, cost) in &updates {
+                stmt.execute(params![id, cost])?;
+                report.changed += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(report)
     }
 
     // ------------------------------------------------------- maintenance
@@ -1147,7 +1307,7 @@ const MENTOR_CALL_COLUMNS: &str =
             model, effort, started_at, ended_at, status, stop_reason, http_status,
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             cost_micros, first_byte_ms, total_ms, request_bytes, apprentice_applied
-     FROM mentor_calls";
+     FROM mentor_calls c";
 
 fn mentor_call_row(r: &Row<'_>) -> rusqlite::Result<MentorCallRow> {
     let status: String = r.get(10)?;
@@ -1254,7 +1414,7 @@ fn insert_mentor_call(conn: &Connection, c: &MentorCallStart) -> Result<()> {
         c.request_event,
         c.model,
         c.effort,
-        now_ts(),
+        c.started_at.clone().unwrap_or_else(now_ts),
         c.request_bytes.map(to_i64),
     ])?;
     Ok(())
@@ -1330,6 +1490,7 @@ fn event_where(q: &EventQuery) -> (String, SqlArgs) {
     (clauses.join(" AND "), args)
 }
 
+/// `WHERE` clause over `mentor_calls c` (the alias lets callers join).
 fn call_where(f: &CallFilter) -> (String, SqlArgs) {
     let mut clauses = Vec::new();
     let mut args: SqlArgs = Vec::new();
@@ -1338,22 +1499,22 @@ fn call_where(f: &CallFilter) -> (String, SqlArgs) {
         clauses.push(clause.replace('?', &format!("?{}", args.len())));
     };
     if let Some(s) = &f.session_id {
-        bind("session_id = ?", s.as_str().to_owned().into());
+        bind("c.session_id = ?", s.as_str().to_owned().into());
     }
     if let Some(a) = &f.agent_id {
-        bind("agent_id = ?", a.as_str().to_owned().into());
+        bind("c.agent_id = ?", a.as_str().to_owned().into());
     }
     if let Some(m) = &f.model {
-        bind("model = ?", m.as_str().to_owned().into());
+        bind("c.model = ?", m.as_str().to_owned().into());
     }
     if let Some(s) = f.status {
-        bind("status = ?", s.as_str().to_owned().into());
+        bind("c.status = ?", s.as_str().to_owned().into());
     }
     if let Some(s) = &f.since {
-        bind("started_at >= ?", s.as_str().to_owned().into());
+        bind("c.started_at >= ?", s.as_str().to_owned().into());
     }
     if let Some(u) = &f.until {
-        bind("started_at < ?", u.as_str().to_owned().into());
+        bind("c.started_at < ?", u.as_str().to_owned().into());
     }
     if clauses.is_empty() {
         clauses.push("1".to_owned());

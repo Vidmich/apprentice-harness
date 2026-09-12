@@ -31,9 +31,9 @@ pub use record::StepRef;
 pub use rpc::TraceService;
 pub use schema::SCHEMA_VERSION;
 pub use store::{
-    AgentRecord, BlobInput, BlobMeta, CallFilter, DiskUsage, EventQuery, IntegrityReport, MAX_PAGE,
-    MentorCallEnd, MentorCallRow, MentorCallStart, NewAgent, NewEvent, NewSession, SessionRecord,
-    StepRecord, TraceStore, UsageTotals,
+    AgentRecord, BlobInput, BlobMeta, CallFilter, DiskUsage, EventQuery, GroupBy, GroupedTotals,
+    IntegrityReport, MAX_PAGE, MentorCallEnd, MentorCallRow, MentorCallStart, NewAgent, NewEvent,
+    NewSession, RepriceReport, SessionRecord, StepRecord, TraceStore, UsageTotals,
 };
 pub use writer::{MAX_BATCH, QUEUE_CAPACITY, TraceWriter};
 
