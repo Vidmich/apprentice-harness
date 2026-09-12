@@ -1,0 +1,8 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "TraceGetParams { event_id: \"e1\".into(), include_blob: true }"
+---
+{
+  "event_id": "e1",
+  "include_blob": true
+}

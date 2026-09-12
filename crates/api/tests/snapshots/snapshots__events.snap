@@ -1,0 +1,112 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: notifications
+---
+[
+  {
+    "subscription": "a1",
+    "seq": 1,
+    "event": {
+      "type": "agent.started",
+      "agent_id": "a1",
+      "session_id": "s1"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 2,
+    "event": {
+      "type": "agent.text_delta",
+      "agent_id": "a1",
+      "text": "Hel"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 3,
+    "event": {
+      "type": "agent.thinking_delta",
+      "agent_id": "a1",
+      "text": "hmm"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 4,
+    "event": {
+      "type": "agent.tool_call",
+      "agent_id": "a1",
+      "call_id": "c1",
+      "name": "read_file",
+      "input": {
+        "path": "src/main.rs"
+      }
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 5,
+    "event": {
+      "type": "agent.tool_result",
+      "agent_id": "a1",
+      "call_id": "c1",
+      "ok": true,
+      "summary": "read 12 lines",
+      "blob_id": "abc"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 6,
+    "event": {
+      "type": "agent.usage",
+      "agent_id": "a1",
+      "call_id": "m1",
+      "usage": {
+        "input_tokens": 1204,
+        "output_tokens": 310,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 900
+      }
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 7,
+    "event": {
+      "type": "agent.finished",
+      "agent_id": "a1",
+      "status": "error",
+      "error": {
+        "code": -32030,
+        "message": "operation cancelled",
+        "data": {
+          "kind": "cancelled"
+        }
+      }
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 8,
+    "event": {
+      "type": "permission.request",
+      "request_id": "p1",
+      "agent_id": "a1",
+      "tool": "shell",
+      "input": {
+        "command": "cargo test"
+      },
+      "risk": "execute"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 9,
+    "event": {
+      "type": "log",
+      "level": "warn",
+      "message": "3 event(s) dropped"
+    }
+  }
+]

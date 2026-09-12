@@ -1,0 +1,10 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "ConfigSetParams\n{\n    key: \"mentor.effort\".into(), value: json!(\"high\"), layer:\n    ConfigLayer::Workspace, workspace: Some(\"C:/src/foo\".into()),\n}"
+---
+{
+  "key": "mentor.effort",
+  "value": "high",
+  "layer": "workspace",
+  "workspace": "C:/src/foo"
+}

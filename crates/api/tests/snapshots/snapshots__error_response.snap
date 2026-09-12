@@ -1,0 +1,19 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: err
+---
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "error": {
+    "code": -32002,
+    "message": "client speaks API v1, daemon speaks API v2",
+    "data": {
+      "kind": "incompatible_api",
+      "details": {
+        "client_api": 1,
+        "daemon_api": 2
+      }
+    }
+  }
+}

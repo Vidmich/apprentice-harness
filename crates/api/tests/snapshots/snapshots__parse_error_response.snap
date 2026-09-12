@@ -1,0 +1,15 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: parse
+---
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": -32700,
+    "message": "expected value at line 1",
+    "data": {
+      "kind": "parse_error"
+    }
+  }
+}

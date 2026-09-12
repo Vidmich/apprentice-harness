@@ -1,0 +1,12 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "AgentRunParams\n{\n    session_id: \"s1\".into(), prompt: \"hello\".into(), options: RunOptions\n    { model: None, effort: Some(Effort::XHigh), apprentice: Some(false) },\n}"
+---
+{
+  "session_id": "s1",
+  "prompt": "hello",
+  "options": {
+    "effort": "xhigh",
+    "apprentice": false
+  }
+}

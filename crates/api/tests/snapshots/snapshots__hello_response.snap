@@ -1,0 +1,13 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: ok
+---
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "api_version": 1,
+    "daemon_version": "0.1.0",
+    "pid": 1234
+  }
+}

@@ -1,0 +1,15 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: req
+---
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "daemon.hello",
+  "params": {
+    "api_version": 1,
+    "client": "harness-cli",
+    "client_version": "0.1.0",
+    "token": "tok"
+  }
+}

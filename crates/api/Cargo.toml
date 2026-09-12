@@ -13,6 +13,17 @@ name = "apprentice_api"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+interprocess = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,0 +1,12 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "TraceListParams\n{\n    session_id: Some(\"s1\".into()), agent_id: None, kinds:\n    vec![\"mentor.request\".into(), \"mentor.response\".into()], limit: Some(50),\n    before_seq: None,\n}"
+---
+{
+  "session_id": "s1",
+  "kinds": [
+    "mentor.request",
+    "mentor.response"
+  ],
+  "limit": 50
+}

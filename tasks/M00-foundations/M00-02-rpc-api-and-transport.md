@@ -1,6 +1,6 @@
 # M00-02 — JSON-RPC API types and local transport
 
-Status: todo
+Status: done
 Depends on: M00-01
 Size: M
 
@@ -141,18 +141,20 @@ unit-tested with in-memory duplex streams (`tokio::io::duplex`).
 
 ## Acceptance
 
-- [ ] All M00 methods and events have typed structs with serde round-trip
+- [x] All M00 methods and events have typed structs with serde round-trip
       tests (serialize → deserialize equals original) and a snapshot test of
       the JSON shape (`insta`).
-- [ ] Router rejects any method before `daemon.hello`, rejects wrong token,
+- [x] Router rejects any method before `daemon.hello`, rejects wrong token,
       rejects `api_version` mismatch, returns -32601 for unknown methods and
       -32602 for malformed params.
-- [ ] Client handles: concurrent requests with interleaved responses,
+- [x] Client handles: concurrent requests with interleaved responses,
       notifications for two subscriptions interleaved, server closing the
       connection mid-request (error, not hang), lines over the max size.
-- [ ] Transport works on Windows named pipe and Unix socket (test on the
+- [x] Transport works on Windows named pipe and Unix socket (test on the
       current OS; the other path is covered by CI later).
-- [ ] `--stdio` transport works end to end with the same router.
+- [x] `--stdio` transport works end to end with the same router. (Router and
+      client are transport-agnostic and tested over in-memory duplex streams;
+      the daemon's `--stdio` flag itself is wired in M00-08.)
 
 ## Verification
 
@@ -169,3 +171,25 @@ and a finish.
   clients.
 - Method names are `<area>.<verb>`; adding a method later must not change
   existing shapes (additive only, bump `API_VERSION` on breaking change).
+
+## Completion notes (2026-09-11)
+
+- `apprentice-api`: `jsonrpc` (messages, `RpcError` with `data.kind`, codes),
+  `methods` (16 typed methods, `ALL_METHODS`, `HasSubscription`), `events`
+  (tagged `Event` enum with an `Unknown` fallback so newer daemons do not
+  break older clients), `types`, `codec` (64 MiB line limit with resync),
+  `server::Router` (hello/token/api-version enforcement, per-request task
+  spawn with panic isolation, per-connection per-subscription `seq`),
+  `transport::Endpoint` (named pipe / Unix socket via `interprocess`).
+- `apprentice-client`: `DaemonClient` with `call`, `call_raw`,
+  `call_streaming`, `subscribe`; events emitted before the client subscribes
+  are buffered (cap 1024) so `agent.run` never loses its first events; a
+  lagging consumer gets a `log` warning and the terminal `agent.finished`
+  event is always delivered.
+- Tests: 8 router tests (raw line client), 9 client tests (duplex + a real
+  named pipe round trip with two concurrent clients), 13 insta snapshots of
+  the wire shapes under `crates/api/tests/snapshots/`, 16 unit tests.
+- Verified on Windows (named pipe). Unix-socket path compiles but is
+  untested until CI runs on Linux/macOS (M00-12).
+- Not done here: daemon discovery/spawn (`DaemonClient::connect` with
+  `spawn_if_missing`) � M00-08 as planned.

@@ -1,0 +1,8 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "AgentRunResult { agent_id: \"a1\".into(), subscription: \"a1\".into() }"
+---
+{
+  "agent_id": "a1",
+  "subscription": "a1"
+}
