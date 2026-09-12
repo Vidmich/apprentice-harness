@@ -1,0 +1,56 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: all
+---
+# {"pattern":"*.rs"}
+[ok]
+src/main.rs
+src/util/mod.rs
+src/lib.rs
+src/util/x.rs
+---
+summary: glob *.rs → 4 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":4,"shown":4,"truncated":false}
+
+# {"pattern":"src/*.rs"}
+[ok]
+src/main.rs
+src/lib.rs
+---
+summary: glob src/*.rs → 2 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":2,"shown":2,"truncated":false}
+
+# {"path":"src/util","pattern":"**/*.rs"}
+[ok]
+src/util/mod.rs
+src/util/x.rs
+---
+summary: glob **/*.rs → 2 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":2,"shown":2,"truncated":false}
+
+# {"pattern":"*.{md,txt}"}
+[ok]
+.harness/HARNESS.md
+README.md
+bom.txt
+crlf.txt
+empty.txt
+latin1.txt
+utf16.txt
+---
+summary: glob *.{md,txt} → 7 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":7,"shown":7,"truncated":false}
+
+# {"pattern":"*.log"}
+[ok]
+[no files match *.log]
+---
+summary: glob *.log → 0 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":0,"shown":0,"truncated":false}
+
+# {"pattern":"index.js"}
+[ok]
+[no files match index.js]
+---
+summary: glob index.js → 0 files
+metadata: {"index_age_s":0,"index_truncated":false,"matches":0,"shown":0,"truncated":false}

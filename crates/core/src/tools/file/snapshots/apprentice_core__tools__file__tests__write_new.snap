@@ -1,0 +1,9 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: show(&out)
+---
+[ok]
+wrote new/dir/hello.txt (12 bytes, new file, 2 lines)
+---
+summary: wrote new/dir/hello.txt (new, 2 lines)
+metadata: {"added":2,"bytes_written":12,"created":true,"removed":0}

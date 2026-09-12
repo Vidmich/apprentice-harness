@@ -108,6 +108,10 @@ impl AppState {
         let writer = TraceWriter::spawn(Arc::clone(&store));
         let secrets = secret_store(paths, config.daemon.secret_store);
         let workspaces = Arc::new(Workspaces::new(Arc::clone(&store)));
+        let tools = Arc::new(ToolRegistry::new());
+        tools
+            .register_all(crate::tools::file_tools())
+            .expect("built-in tools register");
         Ok(Arc::new(Self {
             loader,
             store,
@@ -115,7 +119,7 @@ impl AppState {
             secrets,
             mentor: Mutex::new(None),
             agents: AgentRegistry::new(),
-            tools: Arc::new(ToolRegistry::new()),
+            tools,
             workspaces,
             shutdown: CancellationToken::new(),
         }))
@@ -152,8 +156,8 @@ impl AppState {
         &self.agents
     }
 
-    /// The tools the mentor can call. Empty until the host registers
-    /// them (the built-in set arrives with M01-03..06).
+    /// The tools the mentor can call: the built-in file tools (M01-03)
+    /// plus whatever the host registers.
     pub fn tools(&self) -> &Arc<ToolRegistry> {
         &self.tools
     }
@@ -321,6 +325,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = state(dir.path());
         assert_eq!(state.sessions_open().unwrap(), 0);
+        assert_eq!(
+            state.tools().names(),
+            ["edit_file", "glob", "list_dir", "read_file", "write_file"]
+        );
         let r = state
             .session_create(&SessionCreateParams {
                 workspace: None,

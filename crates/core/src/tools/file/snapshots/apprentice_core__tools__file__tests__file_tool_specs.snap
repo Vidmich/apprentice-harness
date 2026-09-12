@@ -1,0 +1,152 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: specs
+---
+[
+  {
+    "name": "read_file",
+    "description": "Read a text file in the workspace. The output has one line per file line as `<line number><TAB><text>`; line numbers are 1-based and absolute, so `offset` (first line to show) and `limit` (how many lines) page through long files. Defaults: from line 1, up to 2000 lines or 200 KiB per call, after which a `[truncated: ...]` trailer says where to continue. Paths are relative to the workspace root with `/` separators. Binary files are reported, not shown. Use list_dir or glob to find files first.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "Maximum number of lines to show. Default and maximum 2000.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "offset": {
+          "description": "First line to show (1-based). Default 1.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "description": "File path relative to the workspace root.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "file"
+    ]
+  },
+  {
+    "name": "write_file",
+    "description": "Create or overwrite a file in the workspace with exactly `content` (UTF-8, line endings as given). Missing parent directories are created; the write is atomic. To change part of an existing file prefer edit_file. Read a file before overwriting it: the result notes when you replace a file you have not read, or one that changed since you read it, and includes a unified diff of what changed.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "description": "The complete new content of the file.",
+          "type": "string"
+        },
+        "path": {
+          "description": "File path relative to the workspace root.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "risk": "write",
+    "tags": [
+      "file"
+    ]
+  },
+  {
+    "name": "edit_file",
+    "description": "Replace text in a file in the workspace. `old_string` must match the current content exactly — whitespace and indentation included; quote it as read_file shows it, without the line-number prefix — and must occur exactly once: include surrounding lines to make it unique, or set `replace_all` to change every occurrence. `new_string` takes its place (empty deletes it). Line endings and a byte-order mark are preserved. The result is a unified diff of the change; a failed match reports the closest line, an ambiguous one the line of every occurrence.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "new_string": {
+          "description": "The replacement text; empty to delete.",
+          "type": "string"
+        },
+        "old_string": {
+          "description": "The exact text to replace.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "description": "File path relative to the workspace root.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "replace_all": {
+          "description": "Replace every occurrence instead of requiring exactly one. Default false.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
+      "type": "object"
+    },
+    "risk": "write",
+    "tags": [
+      "file"
+    ]
+  },
+  {
+    "name": "list_dir",
+    "description": "List a directory in the workspace as an indented tree: `name/` for directories, `name<TAB><size in bytes>` for files, `name@` for symlinks, two spaces of indent per level below `path`. `path` defaults to the workspace root; `depth` (1–4, default 1) is how many levels to descend. Ignored entries (`.gitignore`, `.harness/ignore`, VCS and build directories, binaries) are left out — read_file still opens them by exact path. Long listings stop at 2000 entries with a `[+N more]` trailer.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "description": "Levels to descend (1–4). Default 1.",
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Directory path relative to the workspace root. Default: the root.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "file"
+    ]
+  },
+  {
+    "name": "glob",
+    "description": "Find files in the workspace by name pattern, gitignore-style: `*` matches within one path segment, `**` across segments, `?` one character, `{a,b}` alternatives, `[abc]` a character class. A pattern without `/` matches file names at any depth (`*.rs`); one with `/` matches the path relative to `path` (`src/**/*.rs`). `path` defaults to the workspace root. The output is one workspace-relative path per line, most recently modified first, at most 1000 (a `[truncated: ...]` trailer says how many matched). Ignored files are not searched.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Directory to search, relative to the workspace root. Default: the root.",
+          "type": "string"
+        },
+        "pattern": {
+          "description": "The glob pattern, e.g. `*.rs`, `src/**/*.test.ts`, `**/Cargo.toml`.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "file"
+    ]
+  }
+]

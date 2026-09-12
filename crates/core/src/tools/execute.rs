@@ -23,7 +23,7 @@ use tracing::{debug, warn};
 use super::limits::{capture_bytes, one_line, truncate_utf8};
 use super::registry::Entry;
 use super::{
-    MAX_SUMMARY_CHARS, Risk, ToolContent, ToolContext, ToolEnv, ToolError, ToolOutput,
+    MAX_SUMMARY_CHARS, Risk, SeenFiles, ToolContent, ToolContext, ToolEnv, ToolError, ToolOutput,
     ToolProgress, ToolRegistry, ToolSpec,
 };
 use crate::config::ToolsConfig;
@@ -139,6 +139,7 @@ pub struct Executor<'a> {
     at: StepRef,
     cancel: CancellationToken,
     workspace: Option<Arc<Workspace>>,
+    seen: Arc<SeenFiles>,
     progress: mpsc::Sender<ToolProgress>,
 }
 
@@ -173,6 +174,7 @@ impl<'a> Executor<'a> {
             at,
             cancel,
             workspace: None,
+            seen: Arc::new(SeenFiles::new()),
             progress,
         }
     }
@@ -180,6 +182,14 @@ impl<'a> Executor<'a> {
     #[must_use]
     pub fn with_workspace(mut self, workspace: Option<Arc<Workspace>>) -> Self {
         self.workspace = workspace;
+        self
+    }
+
+    /// The agent's seen-files set (one per agent, across its steps; a
+    /// fresh one per executor otherwise).
+    #[must_use]
+    pub fn with_seen_files(mut self, seen: Arc<SeenFiles>) -> Self {
+        self.seen = seen;
         self
     }
 
@@ -239,6 +249,7 @@ impl<'a> Executor<'a> {
             agent_id: self.at.agent.clone(),
             call_id: call.id.clone(),
             env,
+            seen: Arc::clone(&self.seen),
             progress: self.progress.clone(),
         };
 

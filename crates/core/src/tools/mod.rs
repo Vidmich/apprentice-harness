@@ -16,17 +16,20 @@
 //! things run one after another, results come back in the order the
 //! mentor asked.
 //!
-//! Concrete tools arrive in M01-03..06; the loop that drives this is
-//! M01-08.
+//! The file tools (M01-03) live in [`file`]; search, shell and git
+//! arrive in M01-04..06; the loop that drives this is M01-08.
 
 mod execute;
+pub mod file;
 mod limits;
 mod registry;
 pub(crate) mod rpc;
 mod schema;
 
+use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use apprentice_api::events::Risk;
@@ -37,6 +40,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub use execute::{AllowAll, Executed, Executor, Gate, ToolCall, ToolResultKind};
+pub use file::file_tools;
 pub use limits::{OUTPUT_MEDIA_TYPE, Truncated, truncate_utf8};
 pub use registry::{RegistryError, ToolRegistry};
 pub use rpc::ToolsService;
@@ -187,6 +191,10 @@ pub struct ToolContext {
     pub agent_id: AgentId,
     pub call_id: String,
     pub env: ToolEnv,
+    /// Files this agent has read, so a write can say when it overwrites
+    /// something the mentor never looked at. Shared across the agent's
+    /// steps by the runtime.
+    pub seen: Arc<SeenFiles>,
     /// Partial output for long tools (shell). Dropped receivers are fine:
     /// sends fail silently.
     pub progress: mpsc::Sender<ToolProgress>,
@@ -200,6 +208,49 @@ impl ToolContext {
             stream,
             text: text.into(),
         });
+    }
+}
+
+/// The files one agent has read or written, with the SHA-256 of their
+/// content at that moment. `write_file`/`edit_file` compare against it
+/// to note an overwrite of unread or since-changed content; nothing
+/// here blocks a call (permissions do that).
+#[derive(Debug, Default)]
+pub struct SeenFiles {
+    inner: Mutex<HashMap<PathBuf, String>>,
+}
+
+impl SeenFiles {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, String>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Records that `path` (absolute) was seen with content hash `hash`.
+    pub fn record(&self, path: &Path, hash: impl Into<String>) {
+        self.lock().insert(path.to_path_buf(), hash.into());
+    }
+
+    /// The content hash `path` had when last seen.
+    pub fn hash_of(&self, path: &Path) -> Option<String> {
+        self.lock().get(path).cloned()
+    }
+
+    pub fn contains(&self, path: &Path) -> bool {
+        self.lock().contains_key(path)
+    }
+
+    pub fn len(&self) -> usize {
+        self.lock().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lock().is_empty()
     }
 }
 

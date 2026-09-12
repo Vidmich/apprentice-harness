@@ -1,0 +1,31 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: all
+---
+# bin/logo.png
+[error]
+`bin/logo.png` is a binary file (20 bytes, image/png); read_file shows text only
+---
+summary: 
+metadata: {"binary":true,"bytes":20}
+
+# missing.txt
+[error]
+`missing.txt` does not exist
+---
+summary: 
+metadata: null
+
+# src
+[error]
+`src` is a directory; use list_dir
+---
+summary: 
+metadata: null
+
+# empty.txt
+[ok]
+[empty file]
+---
+summary: read empty.txt (empty)
+metadata: {"bom":false,"bytes":0,"encoding":"utf-8","language":"text","line_endings":"none","lines":0,"truncated":false}

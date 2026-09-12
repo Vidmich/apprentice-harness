@@ -149,8 +149,24 @@ impl IgnoreRules {
     /// A walker over the root applying every rule (see the module docs):
     /// no symlink following, dotfiles included, deterministic order.
     pub fn walk_builder(&self) -> WalkBuilder {
+        self.walk_builder_from(&self.root)
+    }
+
+    /// The same walker started at `dir` (under the root) and limited to
+    /// `max_depth` levels below it. The rules still match relative to
+    /// the root, and the `.gitignore` chain above `dir` applies.
+    pub fn walk_builder_at(&self, dir: &Path, max_depth: usize) -> WalkBuilder {
+        let mut b = self.walk_builder_from(dir);
+        b.max_depth(Some(max_depth));
+        b
+    }
+
+    fn walk_builder_from(&self, start: &Path) -> WalkBuilder {
+        // A start directory that the rules themselves hide (`target/`)
+        // was named on purpose: list it without them.
+        let explicit = start != self.root && self.is_ignored(start, true);
         let rules = self.clone();
-        let mut b = WalkBuilder::new(&self.root);
+        let mut b = WalkBuilder::new(start);
         b.hidden(false)
             .follow_links(false)
             .require_git(false)
@@ -161,7 +177,7 @@ impl IgnoreRules {
             .parents(true)
             .sort_by_file_path(Ord::cmp)
             .filter_entry(move |e: &DirEntry| {
-                if e.depth() == 0 {
+                if explicit || e.depth() == 0 {
                     return true;
                 }
                 let is_dir = e.file_type().is_some_and(|t| t.is_dir());

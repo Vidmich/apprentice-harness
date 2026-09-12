@@ -260,6 +260,13 @@ impl Workspace {
         self.ignore_rules().walk_builder().build()
     }
 
+    /// A walk of `dir` (absolute, under the root) with the same rules,
+    /// at most `max_depth` levels below it. `dir` itself is the first
+    /// entry.
+    pub fn walker_at(&self, dir: &Path, max_depth: usize) -> ignore::Walk {
+        self.ignore_rules().walk_builder_at(dir, max_depth).build()
+    }
+
     /// Whether `path` (absolute under the root, or root-relative) is
     /// hidden from discovery by the defaults or `.harness/ignore`. Does
     /// not consult `.gitignore` (the walker does).
@@ -292,6 +299,15 @@ impl Workspace {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// Drops the cached index so the next use rebuilds it (a tool
+    /// created or deleted a file).
+    pub fn invalidate_index(&self) {
+        *self
+            .index
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// Re-reads `.harness/ignore` and rebuilds the index now.

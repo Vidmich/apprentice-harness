@@ -1,0 +1,12 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: show(&out)
+---
+[ok]
+4	line 4
+5	line 5
+6	line 6
+[truncated: showing lines 4–6 of 10; call again with offset 7]
+---
+summary: read ten.txt lines 4–6 of 10
+metadata: {"bom":false,"bytes":71,"encoding":"utf-8","end":6,"language":"text","line_endings":"lf","lines":10,"offset":4,"truncated":true}

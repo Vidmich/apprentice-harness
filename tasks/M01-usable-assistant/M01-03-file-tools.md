@@ -1,6 +1,6 @@
 # M01-03 — File tools: read, write, edit, list, glob
 
-Status: todo
+Status: done
 Depends on: M01-01, M01-02
 Size: M
 
@@ -81,15 +81,31 @@ Input: `{pattern: string, path?: string}`; gitignore-style globs via
 
 ## Acceptance
 
-- [ ] Golden tests for each output format (snapshot files) including
-      truncation trailers and error results.
-- [ ] `edit_file` ambiguity and no-match paths produce the specified helpful
-      errors; CRLF file edit preserves CRLF; BOM preserved.
-- [ ] `write_file` is atomic (simulate failure between temp write and
-      rename → original intact).
-- [ ] Binary and non-UTF-8 files handled as specified.
-- [ ] Traces: `tool.result` blob for an edit contains the unified diff;
-      `tool.call` blob contains the exact input.
+- [x] Golden tests for each output format (snapshot files) including
+      truncation trailers and error results. — `tools::file::tests`
+      snapshots `read_basic`, `read_paged`, `read_errors`,
+      `read_encodings`, `write_new`, `write_overwrite_unread`,
+      `edit_single`, `edit_replace_all`, `edit_errors`, `list_trees`,
+      `glob_matches`, `file_tool_specs` (the descriptions, since they
+      are cached-prefix material); caps in
+      `read_file_truncates_at_the_line_and_byte_caps`,
+      `list_dir_caps_the_entries`, `glob_caps_the_results`.
+- [x] `edit_file` ambiguity and no-match paths produce the specified helpful
+      errors; CRLF file edit preserves CRLF; BOM preserved. —
+      `edit_file_no_match_and_ambiguity_errors`,
+      `edit_file_preserves_crlf_and_bom`.
+- [x] `write_file` is atomic (simulate failure between temp write and
+      rename → original intact). —
+      `atomic::tests::a_failure_before_the_rename_leaves_the_original_and_no_temp_file`.
+- [x] Binary and non-UTF-8 files handled as specified. —
+      `read_file_error_results` (binary → error result with size and
+      sniffed type), `read_file_decodes_lossy_utf16_bom_and_crlf`,
+      `edit_file_no_match_and_ambiguity_errors` (binary / lossy / UTF-16
+      refused by `edit_file`).
+- [x] Traces: `tool.result` blob for an edit contains the unified diff;
+      `tool.call` blob contains the exact input. — integration test
+      `file_tools::edit_leaves_the_exact_input_and_the_diff_in_the_trace`
+      (also `write_file_notes_unread_overwrites_and_keeps_the_diff`).
 
 ## Verification
 
@@ -101,3 +117,78 @@ asking the mentor to read, edit and create files in a scratch repo.
 - Tool descriptions are part of the cached prefix; changing wording
   invalidates the cache for all sessions. Keep them stable once M01 ships;
   version them via the protocol directory in M03.
+
+## Completion notes (2026-09-12)
+
+Module `crates/core/src/tools/file/` (`cargo test -p apprentice-core
+tools::file::` plus `tests/file_tools.rs` through the executor):
+
+- `mod.rs` — `file_tools()` (the five tools, registered by
+  `AppState::open_with`, so `harness tools list` shows them), the caps
+  (`READ_MAX_LINES` 2000, `READ_MAX_BYTES` 200 KiB, `LIST_MAX_ENTRIES`
+  2000, `LIST_MAX_DEPTH` 4, `GLOB_MAX_RESULTS` 1000), `target()` (path →
+  `Workspace::resolve`; `Outside` → `ToolError::Denied`, `Invalid` →
+  `InvalidInput`, no workspace → `Failed`), `blocking()` (every tool body
+  runs on `spawn_blocking`).
+- `read.rs` — `<n>\t<line>`, `offset`/`limit`, both caps with the
+  `[truncated: showing lines A–B of N; call again with offset B+1]`
+  trailer, `[empty file]`, error results for missing / directory /
+  binary (`is a binary file (N bytes, image/png)`) / offset past the end;
+  `[note: ...]` header for lossy UTF-8 and UTF-16 (decoded via BOM).
+  Metadata `{lines, bytes, language, truncated, offset, end, encoding,
+  bom, line_endings}`. Records the file in `SeenFiles`.
+- `write.rs` — atomic write, parents created, output = header
+  (`wrote p (N bytes, new file, L lines)` / `wrote p (N bytes, +a −r)`),
+  optional `note: overwrote a file you had not read` /
+  `note: the file changed on disk since you read it`, then the unified
+  diff against the previous content (none for new files; a placeholder
+  when the old content was binary). Creating a file invalidates the
+  workspace index so `glob` sees it at once.
+- `edit.rs` — exact match, once or `replace_all`; zero matches → error
+  listing the closest line (substring match first, else `similar`'s
+  fuzzy ratio ≥ 0.5) and a quoting hint; several → error listing the
+  line numbers (deduplicated, first 10). A CRLF file quoted with LF
+  (what `read_file` shows) is matched and diffed as LF and written back
+  CRLF; mixed files are edited byte for byte; the BOM is kept. Binary,
+  lossy-UTF-8 and UTF-16 files are refused (use `write_file`).
+- `list.rs` — `Workspace::walker_at(dir, depth)`: `name/`, `name\t<bytes>`,
+  `name@` (symlink), two spaces per level, `[+N more]`, `[empty
+  directory]`. Naming an ignored directory (`target`) lists it anyway
+  (`IgnoreRules::walk_builder_at` drops the built-in/`.harness/ignore`
+  filter when the start directory itself is ignored).
+- `glob.rs` — `globset` with `literal_separator`; a pattern without `/`
+  matches file names at any depth, otherwise the path relative to
+  `path`; matches from `Workspace::index()`, mtime desc then path,
+  workspace-relative output, `[no files match P]`, `[truncated: showing
+  1000 of N matches]`, a note when the index itself was truncated.
+- `atomic.rs` (`write_atomic`: temp file in the same directory,
+  `create_new`, fsync, permissions copied on Unix, rename, directory
+  fsync on Unix; the temp file is removed on any failure), `diff.rs`
+  (`unified_diff` via `similar`, 3 lines of context, `a/<p>`/`b/<p>`
+  headers, +/− counts; `closest_line`), `text.rs` (NUL sniff in the
+  first 8 KiB, magic-number/extension media types, BOM and UTF-16
+  decoding, line-ending detection).
+
+Tool system additions: `SeenFiles` (path → SHA-256 at last read/write)
+in `ToolContext::seen`, supplied per agent through
+`Executor::with_seen_files` (a fresh set per executor otherwise — M01-08
+must hold one per agent across steps). `Workspace::invalidate_index()`,
+`Workspace::walker_at()`, `IgnoreRules::walk_builder_at()`.
+
+Dependencies: `similar` 2.7 and `globset` 0.4 (both already in the lock
+via `insta` / `ignore`; `cargo deny` unchanged).
+
+Deviations / decisions:
+
+- `Outside` paths are `denied` results today (the wrapper records them
+  like any denial); M01-07's gate gets to ask the user before the tool
+  runs, and can then hand the tool an allowed absolute path.
+- `edit_file` carries the same unread/changed notes as `write_file`
+  (the spec only asked for `write_file`); neither blocks.
+- `list_dir` prints sizes in bytes (machine-parseable) rather than
+  human units; the root itself is not printed.
+- `glob` results are workspace-relative even when `path` narrows the
+  search, so they feed straight into `read_file`.
+- The GUI/mentor round trip is not yet possible (tools reach the
+  request in M01-08); verified with the goldens, the executor tests and
+  `harness tools list --describe`.

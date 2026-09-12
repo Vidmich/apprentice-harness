@@ -1,0 +1,36 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: all
+---
+# latin1.txt
+[ok]
+[note: not valid UTF-8; undecodable bytes shown as U+FFFD]
+1	caf�
+---
+summary: read latin1.txt lines 1–1 of 1
+metadata: {"bom":false,"bytes":5,"encoding":"utf-8-lossy","end":1,"language":"text","line_endings":"lf","lines":1,"offset":1,"truncated":false}
+
+# utf16.txt
+[ok]
+[note: decoded from UTF-16LE; edit_file cannot change this file]
+1	hi
+---
+summary: read utf16.txt lines 1–1 of 1
+metadata: {"bom":true,"bytes":8,"encoding":"utf-16le","end":1,"language":"text","line_endings":"lf","lines":1,"offset":1,"truncated":false}
+
+# bom.txt
+[ok]
+1	alpha
+2	beta
+---
+summary: read bom.txt lines 1–2 of 2
+metadata: {"bom":true,"bytes":14,"encoding":"utf-8","end":2,"language":"text","line_endings":"lf","lines":2,"offset":1,"truncated":false}
+
+# crlf.txt
+[ok]
+1	one
+2	two
+3	three
+---
+summary: read crlf.txt lines 1–3 of 3
+metadata: {"bom":false,"bytes":17,"encoding":"utf-8","end":3,"language":"text","line_endings":"crlf","lines":3,"offset":1,"truncated":false}

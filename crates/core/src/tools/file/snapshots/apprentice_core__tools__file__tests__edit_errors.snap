@@ -1,0 +1,31 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: all
+---
+# {"new_string":"x","old_string":"    a+b\n","path":"src/lib.rs"}
+old_string not found in `src/lib.rs`.
+Closest line (2):     a + b
+Quote the text exactly as read_file shows it (without the line-number prefix), including whitespace.
+
+# {"new_string":"x","old_string":"zzzz qqqq","path":"src/lib.rs"}
+old_string not found in `src/lib.rs`.
+No similar line either.
+Quote the text exactly as read_file shows it (without the line-number prefix), including whitespace.
+
+# {"new_string":"i64","old_string":"i32","path":"src/lib.rs"}
+old_string occurs 6 times in `src/lib.rs` (lines 1, 5); include more surrounding context so it matches once, or set replace_all: true
+
+# {"new_string":"same","old_string":"same","path":"src/lib.rs"}
+old_string and new_string are identical; nothing to do
+
+# {"new_string":"b","old_string":"a","path":"nope.rs"}
+`nope.rs` does not exist; use write_file to create it
+
+# {"new_string":"b","old_string":"a","path":"bin/logo.png"}
+`bin/logo.png` is a binary file (20 bytes, image/png); edit_file works on text
+
+# {"new_string":"bar","old_string":"caf","path":"latin1.txt"}
+`latin1.txt` is not valid UTF-8, which edit_file cannot rewrite faithfully; use write_file
+
+# {"new_string":"yo","old_string":"hi","path":"utf16.txt"}
+`utf16.txt` is UTF-16LE, which edit_file cannot rewrite faithfully; use write_file

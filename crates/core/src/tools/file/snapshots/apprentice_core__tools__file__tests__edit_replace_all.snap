@@ -1,0 +1,23 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: show(&out)
+---
+[ok]
+edited src/lib.rs (+2 −2, 6 replacements)
+note: overwrote a file you had not read
+
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,7 +1,7 @@
+-pub fn add(a: i32, b: i32) -> i32 {
++pub fn add(a: i64, b: i64) -> i64 {
+     a + b
+ }
+ 
+-pub fn sub(a: i32, b: i32) -> i32 {
++pub fn sub(a: i64, b: i64) -> i64 {
+     a - b
+ }
+---
+summary: edited src/lib.rs (+2 −2)
+metadata: {"added":2,"bom":false,"line_endings":"lf","note":"note: overwrote a file you had not read","removed":2,"replacements":6}

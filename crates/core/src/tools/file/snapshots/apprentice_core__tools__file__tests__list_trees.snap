@@ -1,0 +1,68 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: all
+---
+# {}
+[ok]
+.gitignore	6
+.harness/
+README.md	17
+bin/
+bom.txt	14
+crlf.txt	17
+empty.txt	0
+emptydir/
+latin1.txt	5
+src/
+utf16.txt	8
+---
+summary: listed . (11 entries)
+metadata: {"depth":1,"entries":11,"shown":11,"truncated":false}
+
+# {"depth":2,"path":"src"}
+[ok]
+lib.rs	97
+main.rs	34
+util/
+  mod.rs	11
+  x.rs	14
+---
+summary: listed src/ (5 entries)
+metadata: {"depth":2,"entries":5,"shown":5,"truncated":false}
+
+# {"depth":4,"path":"."}
+[ok]
+.gitignore	6
+.harness/
+  HARNESS.md	15
+README.md	17
+bin/
+bom.txt	14
+crlf.txt	17
+empty.txt	0
+emptydir/
+latin1.txt	5
+src/
+  lib.rs	97
+  main.rs	34
+  util/
+    mod.rs	11
+    x.rs	14
+utf16.txt	8
+---
+summary: listed . (17 entries)
+metadata: {"depth":4,"entries":17,"shown":17,"truncated":false}
+
+# {"path":"emptydir"}
+[ok]
+[empty directory]
+---
+summary: listed emptydir/ (0 entries)
+metadata: {"depth":1,"entries":0,"shown":0,"truncated":false}
+
+# {"path":"target"}
+[ok]
+debug/
+---
+summary: listed target/ (1 entry)
+metadata: {"depth":1,"entries":1,"shown":1,"truncated":false}

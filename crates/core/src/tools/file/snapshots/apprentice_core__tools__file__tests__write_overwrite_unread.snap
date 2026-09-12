@@ -1,0 +1,19 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: show(&out)
+---
+[ok]
+wrote README.md (24 bytes, +2 −1)
+note: overwrote a file you had not read
+
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,4 @@
+ # Sample
+ 
+-Hello.
++Goodbye.
++Bye.
+---
+summary: wrote README.md (+2 −1)
+metadata: {"added":2,"bytes_written":24,"created":false,"note":"note: overwrote a file you had not read","removed":1}

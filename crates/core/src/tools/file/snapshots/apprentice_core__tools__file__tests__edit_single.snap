@@ -1,0 +1,18 @@
+---
+source: crates/core/src/tools/file/tests.rs
+expression: show(&out)
+---
+[ok]
+edited src/lib.rs (+1 −0, 1 replacement)
+
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,4 +1,5 @@
+ pub fn add(a: i32, b: i32) -> i32 {
++    // sum
+     a + b
+ }
+ 
+---
+summary: edited src/lib.rs (+1 −0)
+metadata: {"added":1,"bom":false,"line_endings":"lf","removed":0,"replacements":1}
