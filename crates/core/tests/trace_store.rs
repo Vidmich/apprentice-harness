@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use apprentice_api::events::AgentStatus;
 use apprentice_api::methods::{
-    SessionList, SessionListParams, SessionListResult, TraceGet, TraceGetParams, TraceGetResult,
-    TraceList, TraceListParams, TraceListResult,
+    TraceGet, TraceGetParams, TraceGetResult, TraceList, TraceListParams, TraceListResult,
 };
 use apprentice_api::server::{Router, RouterConfig};
 use apprentice_api::types::{Effort, Usage};
@@ -19,9 +19,9 @@ use apprentice_core::mentor::{
     Thinking, Timing,
 };
 use apprentice_core::trace::{
-    AgentId, BlobId, CallFilter, CallId, EventId, EventQuery, NewAgent, NewEvent, NewSession,
-    RunStatus, SCHEMA_VERSION, SessionId, StepRef, TraceError, TraceService, TraceStore,
-    TraceWriter, kinds,
+    AgentId, BlobId, CallFilter, CallId, CallKind, EventId, EventQuery, NewAgent, NewEvent,
+    NewSession, RunStatus, SCHEMA_VERSION, SessionId, SessionQuery, StepRef, TraceError,
+    TraceService, TraceStore, TraceWriter, kinds,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -171,10 +171,15 @@ fn session_agent_step_lifecycle_records_events() {
     let seqs: Vec<u64> = evs.iter().map(|e| e.summary.seq).collect();
     assert_eq!(seqs, vec![1, 2, 3]);
 
-    let sessions = store.list_sessions(None, 0).unwrap();
+    let sessions = store.list_sessions(&SessionQuery::default()).unwrap();
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, sid.as_str());
     assert!(sessions[0].updated_at >= sessions[0].created_at);
+    assert_eq!(sessions[0].last_agent_status, Some(AgentStatus::Error));
+    assert_eq!(
+        store.get_session(&sid).unwrap().last_agent_status,
+        Some(RunStatus::Error)
+    );
 
     assert!(matches!(
         store.get_agent(&AgentId::from("nope")),
@@ -425,10 +430,18 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     let req = request();
     let body = serde_json::to_vec(&req).unwrap();
     let req_ev = store
-        .record_mentor_request(&at, &call, &req, &body, Some("mentor_system_v1"))
+        .record_mentor_request(
+            &at,
+            &call,
+            CallKind::Step,
+            &req,
+            &body,
+            Some("mentor_system_v1"),
+        )
         .unwrap();
     let running = store.get_mentor_call(&call).unwrap();
     assert_eq!(running.status, RunStatus::Running);
+    assert_eq!(running.kind, CallKind::Step);
     assert_eq!(running.request_event_id, req_ev);
     assert_eq!(running.effort.as_deref(), Some("low"));
     assert_eq!(running.request_bytes, Some(body.len() as u64));
@@ -481,7 +494,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 2: a retried attempt, then a final error; unpriced.
     let call2 = CallId::generate();
     store
-        .record_mentor_request(&at, &call2, &req, &body, None)
+        .record_mentor_request(&at, &call2, CallKind::Step, &req, &body, None)
         .unwrap();
     store
         .record_mentor_error(&at, &call2, &MentorError::Overloaded, 0, false)
@@ -512,7 +525,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 3: cancelled.
     let call3 = CallId::generate();
     store
-        .record_mentor_request(&at, &call3, &req, &body, None)
+        .record_mentor_request(&at, &call3, CallKind::Step, &req, &body, None)
         .unwrap();
     store
         .record_mentor_error(&at, &call3, &MentorError::Cancelled, 0, true)
@@ -525,7 +538,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 4: ok but unpriced.
     let call4 = CallId::generate();
     store
-        .record_mentor_request(&at, &call4, &req, &body, None)
+        .record_mentor_request(&at, &call4, CallKind::Title, &req, &body, None)
         .unwrap();
     store
         .record_mentor_response(&at, &call4, &response(None), None)
@@ -658,10 +671,7 @@ async fn rpc_handlers_over_a_router() {
         token: None,
     });
     svc.register(&mut router);
-    assert_eq!(
-        router.methods(),
-        vec!["session.list", "trace.get", "trace.list"]
-    );
+    assert_eq!(router.methods(), vec!["trace.get", "trace.list"]);
 
     let (server_side, client_side) = tokio::io::duplex(1 << 16);
     let (sr, sw) = tokio::io::split(server_side);
@@ -672,13 +682,6 @@ async fn rpc_handlers_over_a_router() {
     let (cr, cw) = tokio::io::split(client_side);
     let client = DaemonClient::from_streams(cr, cw, ClientOptions::default());
     client.hello("test", "0", None).await.unwrap();
-
-    let s: SessionListResult = client
-        .call::<SessionList>(SessionListParams::default())
-        .await
-        .unwrap();
-    assert_eq!(s.sessions.len(), 1);
-    assert_eq!(s.sessions[0].title.as_deref(), Some("t"));
 
     let l: TraceListResult = client
         .call::<TraceList>(TraceListParams {

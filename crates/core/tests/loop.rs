@@ -104,7 +104,7 @@ impl Harness {
         std::fs::write(
             paths.config_file(),
             format!(
-                "[daemon]\nsecret_store = \"file\"\n\n[mentor]\nbase_url = \"{}\"\nmax_retries = 0\ntimeout_s = 30\n{extra}",
+                "[daemon]\nsecret_store = \"file\"\n\n[sessions]\nauto_title = false\n\n[mentor]\nbase_url = \"{}\"\nmax_retries = 0\ntimeout_s = 30\n{extra}",
                 server.uri()
             ),
         )

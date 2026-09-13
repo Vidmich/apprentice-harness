@@ -443,6 +443,41 @@ mod tests {
         let e = Cli::try_parse_from(["harness", "run", "hi", "--session", "s", "--workspace", "."])
             .unwrap_err();
         assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let e =
+            Cli::try_parse_from(["harness", "run", "hi", "--session", "s", "--last"]).unwrap_err();
+        assert_eq!(e.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let c =
+            Cli::try_parse_from(["harness", "run", "--last", "--workspace", ".", "hi"]).unwrap();
+        assert!(matches!(c.command, Command::Run(_)));
+    }
+
+    #[test]
+    fn session_commands_parse() {
+        for args in [
+            vec![
+                "session",
+                "list",
+                "--query",
+                "hello",
+                "--all",
+                "--workspace",
+                ".",
+            ],
+            vec![
+                "session", "show", "s1", "--after", "3", "--limit", "10", "--full",
+            ],
+            vec!["session", "search", "hello world", "--limit", "5"],
+            vec!["session", "rename", "s1", "A title"],
+            vec!["session", "archive", "s1", "--undo"],
+            vec!["session", "delete", "s1", "--purge-traces"],
+            vec!["session", "export", "s1", "-o", "out.json"],
+        ] {
+            let mut full = vec!["harness"];
+            full.extend(args.iter());
+            let c = Cli::try_parse_from(&full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(matches!(c.command, Command::Session(_)));
+        }
+        assert!(Cli::try_parse_from(["harness", "session", "rename", "s1"]).is_err());
     }
 
     #[test]

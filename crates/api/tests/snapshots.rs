@@ -8,16 +8,19 @@ use apprentice_api::events::{
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
-    PermissionRespondParams, PromptBlock, PromptShowParams, PromptShowResult, StatsRepriceParams,
-    StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult, ToolsRuleParams,
-    ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceGetParams, TraceListParams,
-    WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult, WorkspaceListResult,
-    WorkspaceRemoveResult,
+    PermissionRespondParams, PromptBlock, PromptShowParams, PromptShowResult, SessionDeleteParams,
+    SessionDeleteResult, SessionGetParams, SessionGetResult, SessionListParams, SessionListResult,
+    SessionSearchParams, SessionSearchResult, StatsRepriceParams, StatsRepriceResult,
+    StatsTokensParams, ToolsListParams, ToolsListResult, ToolsRuleParams, ToolsRuleResult,
+    ToolsRulesParams, ToolsRulesResult, TraceGetParams, TraceListParams, WorkspaceAddParams,
+    WorkspaceIdParams, WorkspaceInfoResult, WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
-    ApprenticeStats, ConfigLayer, Effort, PermissionAnswer, PermissionDecision, PermissionMode,
-    PermissionSource, RuleDefault, RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource,
-    RuleSpec, RunOptions, StatsRange, TokenBucket, TokenStats, ToolInfo, Usage, WorkspaceSummary,
+    ApprenticeStats, ConfigLayer, Effort, MentorCallInfo, PermissionAnswer, PermissionDecision,
+    PermissionMode, PermissionSource, RuleDefault, RuleEffect, RuleFileInfo, RuleInfo, RuleMatch,
+    RuleSource, RuleSpec, RunOptions, SESSION_EXPORT_FORMAT, SessionExport, SessionInfo,
+    SessionMessage, SessionSearchHit, SessionSummary, StatsRange, TokenBucket, TokenStats,
+    ToolInfo, Usage, WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -223,6 +226,154 @@ root: /work/repo
                 token_error: None,
             }
         )
+    );
+}
+
+#[test]
+fn session_shapes() {
+    let usage = Usage {
+        input_tokens: 1204,
+        output_tokens: 310,
+        cache_read_input_tokens: 900,
+        cache_creation_input_tokens: 0,
+    };
+    let summary = SessionSummary {
+        id: "s1".into(),
+        title: Some("Add a hello module".into()),
+        workspace: Some("C:/src/repo".into()),
+        workspace_id: Some("w1".into()),
+        status: "open".into(),
+        created_at: "2026-09-12T10:00:00.000Z".into(),
+        updated_at: "2026-09-12T10:05:00.000Z".into(),
+        message_count: 7,
+        last_activity: "2026-09-12T10:04:30.000Z".into(),
+        last_agent_status: Some(AgentStatus::Ok),
+        usage,
+        cost_usd: Some(0.0138),
+    };
+    assert_json_snapshot!(
+        "session_list",
+        (
+            SessionListParams {
+                query: Some("hello".into()),
+                workspace: None,
+                workspace_id: Some("w1".into()),
+                include_archived: false,
+                limit: Some(20),
+                offset: None,
+            },
+            SessionListResult {
+                sessions: vec![summary.clone()],
+            }
+        )
+    );
+    let info = SessionInfo {
+        summary,
+        title_source: Some("generated".into()),
+        prompt_version: Some("mentor_system_v1".into()),
+        tools_hash: Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".into()),
+        config: json!({ "mentor": { "model": "claude-opus-5" } }),
+    };
+    let messages = vec![
+        SessionMessage {
+            seq: 1,
+            role: "user".into(),
+            content: json!([{ "type": "text", "text": "add hello" }]),
+            agent_id: Some("a1".into()),
+            step_id: None,
+            created_at: "2026-09-12T10:00:01.000Z".into(),
+        },
+        SessionMessage {
+            seq: 2,
+            role: "assistant".into(),
+            content: json!([
+                { "type": "thinking", "thinking": "…", "signature": "sig" },
+                { "type": "text", "text": "I'll read both files." },
+                { "type": "tool_use", "id": "toolu_01A", "name": "read_file", "input": { "path": "src/main.rs" } }
+            ]),
+            agent_id: Some("a1".into()),
+            step_id: Some("st1".into()),
+            created_at: "2026-09-12T10:00:03.000Z".into(),
+        },
+    ];
+    assert_json_snapshot!(
+        "session_get",
+        (
+            SessionGetParams {
+                id: "s1".into(),
+                after_seq: None,
+                limit: Some(2),
+            },
+            SessionGetResult {
+                session: info.clone(),
+                messages: messages.clone(),
+                has_more: true,
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "session_search",
+        (
+            SessionSearchParams {
+                query: "hello".into(),
+                include_archived: false,
+                limit: None,
+            },
+            SessionSearchResult {
+                hits: vec![SessionSearchHit {
+                    session_id: "s1".into(),
+                    title: Some("Add a hello module".into()),
+                    workspace: Some("C:/src/repo".into()),
+                    seq: 1,
+                    role: "user".into(),
+                    snippet: "add [hello]".into(),
+                    created_at: "2026-09-12T10:00:01.000Z".into(),
+                }],
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "session_delete",
+        (
+            SessionDeleteParams {
+                id: "s1".into(),
+                purge_traces: true,
+            },
+            SessionDeleteResult {
+                messages_deleted: 7,
+                events_deleted: 41,
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "session_export",
+        SessionExport {
+            format: SESSION_EXPORT_FORMAT.into(),
+            exported_at: "2026-09-12T11:00:00.000Z".into(),
+            session: info,
+            messages,
+            mentor_calls: vec![MentorCallInfo {
+                id: "c1".into(),
+                agent_id: "a1".into(),
+                step_id: "st9".into(),
+                kind: "title".into(),
+                model: "claude-haiku-4-5-20251001".into(),
+                effort: Some("low".into()),
+                started_at: "2026-09-12T10:04:31.000Z".into(),
+                ended_at: Some("2026-09-12T10:04:32.000Z".into()),
+                status: "ok".into(),
+                stop_reason: Some("end_turn".into()),
+                usage: Some(Usage {
+                    input_tokens: 80,
+                    output_tokens: 7,
+                    cache_read_input_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                }),
+                cost_usd: Some(0.000_115),
+                first_byte_ms: Some(300),
+                total_ms: Some(410),
+            }],
+        }
     );
 }
 

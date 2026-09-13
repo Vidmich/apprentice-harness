@@ -11,6 +11,11 @@
 //! per agent, a child of the daemon's shutdown token, so shutdown
 //! cancels every in-flight mentor call and [`AgentRegistry::drain`]
 //! lets them record their end before the trace store closes.
+//!
+//! A session's conversation lives in memory while the daemon runs and
+//! in `session_messages` for good (task M01-10): the first run after
+//! a restart loads it back ([`load_conversation`]), repairs a turn a
+//! crash left half-done, and carries on.
 
 mod agent;
 pub mod conversation;
@@ -25,10 +30,11 @@ use std::time::{Duration, Instant};
 use apprentice_api::events::{AgentStatus, Event};
 use apprentice_api::jsonrpc::RpcError;
 pub use apprentice_api::types::RunOptions;
+use serde_json::json;
 use tokio::sync::{broadcast, watch};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{Instrument, info, info_span};
+use tracing::{Instrument, info, info_span, warn};
 
 pub use agent::DEFAULT_WAIT;
 pub use conversation::{CONTINUE_MESSAGE, Conversation, hash_tools};
@@ -39,8 +45,12 @@ pub use prompt::{
 pub use rpc::prompt_show;
 
 use crate::app::AppState;
+use crate::mentor::{ContentBlock, Message, Role};
 use crate::permissions::EventSink;
-use crate::trace::{AgentId, CallFilter, NewAgent, NewEvent, SessionId, kinds};
+use crate::trace::{
+    AgentId, CallFilter, NewAgent, NewEvent, NewMessage, SessionId, SessionStatus, TitleSource,
+    first_prompt_title, kinds,
+};
 
 /// Events buffered per agent for a subscriber that falls behind; a
 /// subscriber that lags further gets a `log` event naming the gap.
@@ -151,22 +161,43 @@ impl AgentRegistry {
             .cloned()
     }
 
-    /// The conversation of `session`, created empty on first use (a
-    /// resumed session is loaded by M01-10).
-    pub fn conversation(&self, session: &SessionId) -> SharedConversation {
+    /// The conversation of `session` when this daemon holds it (see
+    /// [`load_conversation`] for the one that brings it in).
+    pub fn loaded_conversation(&self, session: &SessionId) -> Option<SharedConversation> {
+        self.conversations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session)
+            .cloned()
+    }
+
+    /// Keeps `conversation` for `session`; when one arrived first (two
+    /// loads racing) that one wins and is returned.
+    pub fn insert_conversation(
+        &self,
+        session: SessionId,
+        conversation: Conversation,
+    ) -> SharedConversation {
         Arc::clone(
             self.conversations
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .entry(session.clone())
-                .or_insert_with(|| {
-                    Arc::new(tokio::sync::Mutex::new(Conversation::new(session.clone())))
-                }),
+                .entry(session)
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(conversation))),
         )
     }
 
-    /// Forgets the conversation of `session` (its next run starts
-    /// from an empty history).
+    /// Runs `task` under the registry's tracker, so shutdown waits for
+    /// it like for an agent (the title generator uses this).
+    pub fn spawn<F>(&self, task: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.tasks.spawn(task);
+    }
+
+    /// Forgets the conversation of `session` (its next run loads it
+    /// from the store again, or finds nothing there).
     pub fn forget_conversation(&self, session: &SessionId) {
         self.conversations
             .lock()
@@ -219,14 +250,19 @@ pub async fn run_agent(
     run_agent_with(state, session, prompt, opts, Arc::new(NoopHooks)).await
 }
 
-/// Starts an agent for `prompt` in `session`: records `agent.started`
-/// and `user.message`, spawns the loop over the session's conversation
-/// and returns the handle together with an event receiver subscribed
-/// before the first event, so the caller misses nothing.
+/// Starts an agent for `prompt` in `session`: records `agent.started`,
+/// appends the user turn to the conversation (loading it from the
+/// store first when this daemon has not seen the session) together
+/// with its `user.message`, spawns the loop and returns the handle
+/// together with an event receiver subscribed before the first event,
+/// so the caller misses nothing. The first run names an untitled
+/// session after its prompt; the first answered run asks the title
+/// model for a better one (`sessions.auto_title`).
 ///
 /// # Errors
-/// Unknown session, an agent already running on it (`conflict`), or
-/// the trace store cannot record the start.
+/// Unknown or deleted session, an agent already running on it
+/// (`conflict`), a stored history the API would reject, or the trace
+/// store cannot record the start.
 pub async fn run_agent_with(
     state: &Arc<AppState>,
     session: SessionId,
@@ -236,14 +272,20 @@ pub async fn run_agent_with(
 ) -> Result<(AgentHandle, broadcast::Receiver<Event>), RpcError> {
     // Fail before anything is recorded when the session does not exist
     // or is busy.
-    state.store().get_session(&session)?;
+    let record = state.store().get_session(&session)?;
+    if record.status == SessionStatus::Deleted {
+        return Err(RpcError::conflict(format!(
+            "session {session} was deleted; its conversation is gone"
+        )));
+    }
     if let Some(running) = state.agents().running_on(&session) {
         return Err(RpcError::conflict(format!(
             "agent {} is still running on session {session}",
             running.agent_id
         ))
-        .with_details(serde_json::json!({ "agent_id": running.agent_id.to_string() })));
+        .with_details(json!({ "agent_id": running.agent_id.to_string() })));
     }
+    let conversation = load_conversation(state, &session).await?;
     let new_agent = NewAgent {
         options: serde_json::to_value(&opts).map_err(|e| RpcError::internal(e.to_string()))?,
         ..NewAgent::main(session.clone(), prompt.clone())
@@ -251,15 +293,6 @@ pub async fn run_agent_with(
     let agent_id = state
         .writer()
         .run(move |store| store.start_agent(&new_agent))
-        .await?;
-    state
-        .writer()
-        .append(
-            NewEvent::new(session.clone(), kinds::USER_MESSAGE)
-                .agent(agent_id.clone())
-                .payload(serde_json::json!({ "text_len": prompt.len() }))
-                .blob_bytes(prompt.clone(), "text/plain; charset=utf-8"),
-        )
         .await?;
 
     let (events, receiver) = broadcast::channel(EVENT_BUFFER);
@@ -272,10 +305,40 @@ pub async fn run_agent_with(
         finished,
     };
     let registry = state.agents();
-    let conversation = registry.conversation(&session);
-    // Two `agent.run` racing past the check above: the second waits
-    // for the lock, so the histories still never interleave.
+    // From here on a second `agent.run` on the session is a conflict;
+    // the lock below is only against a reader (`prompt.show`).
     registry.lock().insert(agent_id.clone(), handle.clone());
+
+    // The user turn, in memory and in the store as one transaction
+    // with its event. A provisional title for a session without one.
+    let title = (record.title_source.is_none() && record.message_count == 0)
+        .then(|| first_prompt_title(&prompt))
+        .filter(|t| !t.is_empty());
+    let recorded = {
+        let mut conv = conversation.lock().await;
+        conv.push_user_text(prompt.as_str());
+        let row = user_row(&conv, &agent_id);
+        let (session, agent, text) = (session.clone(), agent_id.clone(), prompt.clone());
+        state
+            .writer()
+            .run(move |store| {
+                if let Some(title) = &title {
+                    store.set_session_title(&session, Some(title), TitleSource::Prompt)?;
+                }
+                store.append_with_message(
+                    NewEvent::new(session.clone(), kinds::USER_MESSAGE)
+                        .agent(agent)
+                        .payload(json!({ "text_len": text.len() }))
+                        .blob_bytes(text, "text/plain; charset=utf-8"),
+                    &row,
+                )
+            })
+            .await
+    };
+    if let Err(e) = recorded {
+        registry.remove(&agent_id);
+        return Err(e.into());
+    }
     info!(agent = %agent_id, session = %session, "agent started");
 
     let span = info_span!("agent", id = %agent_id);
@@ -283,37 +346,139 @@ pub async fn run_agent_with(
     let task_handle = handle.clone();
     registry.tasks.spawn(
         async move {
-            let event = {
+            let (event, answer) = {
                 let mut conv = conversation.lock().await;
-                seed_totals(&task_state, &mut conv);
-                agent::execute(
-                    &task_state,
-                    &task_handle,
-                    &prompt,
-                    &opts,
-                    &mut conv,
-                    hooks.as_ref(),
-                )
-                .await
+                let event =
+                    agent::execute(&task_state, &task_handle, &opts, &mut conv, hooks.as_ref())
+                        .await;
+                (event, last_answer(&conv))
             };
             // `execute` has recorded `agent.finished`, so `agent.subscribe`
             // finds the end in the store once the registry drops the agent
             // and in the handle (set before the event is emitted) until.
             task_state.agents().remove(&task_handle.agent_id);
             let _ = finished_tx.send(Some(event.clone()));
+            let ok = matches!(
+                event,
+                Event::AgentFinished {
+                    status: AgentStatus::Ok,
+                    ..
+                }
+            );
             task_handle.emit(event);
+            if ok && let Some(answer) = answer {
+                crate::sessions::title::maybe_generate(
+                    &task_state,
+                    task_handle.session_id.clone(),
+                    task_handle.agent_id.clone(),
+                    prompt,
+                    answer,
+                );
+            }
         }
         .instrument(span),
     );
     Ok((handle, receiver))
 }
 
-/// A conversation that has no calls yet starts its running totals from
-/// what the store has for the session (earlier daemon runs).
-fn seed_totals(state: &AppState, conv: &mut Conversation) {
-    if conv.last_usage().is_some() || conv.message_count() > 0 {
-        return;
+/// The conversation of `session`: the one this daemon holds, else the
+/// stored one, loaded and checked. A trailing assistant turn whose
+/// tool calls were never answered (a crash between the call and the
+/// tools) is dropped here and in the store, with `session.repaired`
+/// in the trace. Running totals start from the session's recorded
+/// calls.
+///
+/// # Errors
+/// Unknown session; a stored history that breaks the API's rules
+/// beyond that repair (`internal`).
+pub async fn load_conversation(
+    state: &Arc<AppState>,
+    session: &SessionId,
+) -> Result<SharedConversation, RpcError> {
+    if let Some(conv) = state.agents().loaded_conversation(session) {
+        return Ok(conv);
     }
+    let record = state.store().get_session(session)?;
+    let rows = state.store().session_messages(session, 0, None)?;
+    let messages = rows
+        .into_iter()
+        .map(|r| Message {
+            role: r.role,
+            content: r.content,
+        })
+        .collect();
+    let mut conv = Conversation::load(session.clone(), messages).with_tools_hash(record.tools_hash);
+    if let Some(dropped) = conv.repair() {
+        let keep = conv.message_count() as u64;
+        let ids: Vec<String> = dropped
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        warn!(
+            session = %session,
+            dropped_seq = keep + 1,
+            tool_uses = ?ids,
+            "dropped an assistant turn whose tool calls had no results"
+        );
+        let sid = session.clone();
+        state
+            .writer()
+            .run(move |store| {
+                store.truncate_session_messages(&sid, keep)?;
+                store.append(
+                    NewEvent::new(sid.clone(), kinds::SESSION_REPAIRED).payload(json!({
+                        "dropped_seq": keep + 1,
+                        "tool_use_ids": ids,
+                    })),
+                )
+            })
+            .await?;
+    }
+    if let Err(reason) = conv.validate() {
+        return Err(RpcError::internal(format!(
+            "session {session}: the stored conversation is not one the API accepts ({reason});              delete the session or export it for inspection"
+        ))
+        .with_details(json!({ "reason": "invalid_history" })));
+    }
+    if record.message_count > 0 {
+        seed_totals(state, &mut conv);
+    }
+    Ok(state.agents().insert_conversation(session.clone(), conv))
+}
+
+/// The last message as a store row (task M01-10 keeps `seq` equal to
+/// the message's position).
+fn user_row(conv: &Conversation, agent: &AgentId) -> NewMessage {
+    let (seq, msg) = conv.last_row().expect("the user turn was just pushed");
+    NewMessage {
+        session: conv.session_id().clone(),
+        seq,
+        role: msg.role,
+        content: msg.content.clone(),
+        agent: Some(agent.clone()),
+        step: None,
+    }
+}
+
+/// The text of the final assistant turn, when the conversation ends
+/// on one.
+fn last_answer(conv: &Conversation) -> Option<String> {
+    let last = conv.messages().last()?;
+    (last.role == Role::Assistant).then(|| {
+        last.content
+            .iter()
+            .filter_map(ContentBlock::as_text)
+            .collect::<String>()
+    })
+}
+
+/// A loaded conversation starts its running totals from what the
+/// store has for the session (earlier daemon runs).
+fn seed_totals(state: &AppState, conv: &mut Conversation) {
     match state
         .store()
         .stats(&CallFilter::session_of(conv.session_id()))

@@ -8,14 +8,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use apprentice_api::jsonrpc::RpcError;
-use apprentice_api::methods::{SessionCreate, SessionCreateParams, SessionCreateResult};
-use apprentice_api::server::{Connection, Router};
+use apprentice_api::methods::{SessionCreateParams, SessionCreateResult};
+use apprentice_api::server::Router;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ConfigError, ConfigLoader, ConfigService, Paths, secret_store};
 use crate::mentor::{AnthropicMentor, Mentor};
 use crate::permissions::{PermissionBroker, PermissionService};
-use crate::runtime::AgentRegistry;
+use crate::runtime::{AgentRegistry, SharedConversation};
 use crate::secrets::{ChainStore, SecretError, api_key_name};
 use crate::stats::StatsService;
 use crate::tools::{ToolRegistry, ToolsService};
@@ -165,6 +165,19 @@ impl AppState {
         &self.tools
     }
 
+    /// The conversation of `session`, loaded from the store when this
+    /// daemon does not hold it yet (see
+    /// [`crate::runtime::load_conversation`]).
+    ///
+    /// # Errors
+    /// Unknown session, or a stored history the API would reject.
+    pub async fn conversation(
+        self: &Arc<Self>,
+        session: &crate::trace::SessionId,
+    ) -> Result<SharedConversation, RpcError> {
+        crate::runtime::load_conversation(self, session).await
+    }
+
     /// The workspace registry and its open handles.
     pub fn workspaces(&self) -> &Arc<Workspaces> {
         &self.workspaces
@@ -298,11 +311,7 @@ impl AppState {
             self.loader.clone(),
         ))
         .register(router);
-        let state = Arc::clone(self);
-        router.add::<SessionCreate, _, _>(move |_c: Arc<Connection>, p: SessionCreateParams| {
-            let state = Arc::clone(&state);
-            async move { state.session_create(&p).await }
-        });
+        crate::sessions::register(self, router);
     }
 
     /// Cancels the agents, waits for them to record their end, then
@@ -444,8 +453,14 @@ mod tests {
                 "config.set",
                 "permission.respond",
                 "prompt.show",
+                "session.archive",
                 "session.create",
+                "session.delete",
+                "session.export",
+                "session.get",
                 "session.list",
+                "session.rename",
+                "session.search",
                 "stats.reprice",
                 "stats.tokens",
                 "tools.allow",

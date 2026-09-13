@@ -41,6 +41,10 @@ pub enum TraceError {
     #[error("invalid {what}: {reason}")]
     Invalid { what: &'static str, reason: String },
 
+    /// The row exists already (an import under a taken id).
+    #[error("{0}")]
+    Conflict(String),
+
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -90,6 +94,7 @@ impl TraceError {
             Self::NotFound { .. } => "not_found",
             Self::BlobCorrupted { .. } => "blob_corrupted",
             Self::Invalid { .. } => "invalid",
+            Self::Conflict(_) => "conflict",
             Self::Json(_) => "json",
             Self::WriterClosed => "writer_closed",
             Self::BatchFailed(_) => "batch_failed",
@@ -102,6 +107,7 @@ impl From<TraceError> for RpcError {
         match &e {
             TraceError::NotFound { .. } => RpcError::not_found(e.to_string()),
             TraceError::Invalid { .. } => RpcError::invalid_params(e.to_string()),
+            TraceError::Conflict(_) => RpcError::conflict(e.to_string()),
             _ => RpcError::internal(format!("trace store: {e}"))
                 .with_details(serde_json::json!({ "reason": e.kind() })),
         }

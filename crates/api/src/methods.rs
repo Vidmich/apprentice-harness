@@ -9,7 +9,8 @@ use serde_json::Value;
 
 use crate::types::{
     ConfigLayer, ConfigSource, EventSummary, PermissionAnswer, RuleFileInfo, RuleInfo, RuleMatch,
-    RuleSpec, RunOptions, SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
+    RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
+    SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -194,15 +195,28 @@ method!(
     SessionCreateResult
 );
 
+/// `session.list`: newest activity first. Archived and deleted
+/// sessions are left out unless `include_archived`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SessionListParams {
+    /// Keep sessions whose title or messages contain these words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Keep sessions created on this workspace root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Keep sessions linked to this registry row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionListResult {
     pub sessions: Vec<SessionSummary>,
 }
@@ -212,6 +226,119 @@ method!(
     "session.list",
     SessionListParams,
     SessionListResult
+);
+
+/// `session.get`: the session and a page of its messages, in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionGetParams {
+    pub id: String,
+    /// Messages with `seq` above this (paging forwards).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionGetResult {
+    pub session: SessionInfo,
+    pub messages: Vec<SessionMessage>,
+    /// More messages follow the page.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_more: bool,
+}
+
+method!(
+    SessionGet,
+    "session.get",
+    SessionGetParams,
+    SessionGetResult
+);
+
+/// `session.search`: full-text search over the text of every stored
+/// message; words are matched as prefixes, all of them must appear.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSearchParams {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSearchResult {
+    /// Newest first.
+    pub hits: Vec<SessionSearchHit>,
+}
+
+method!(
+    SessionSearch,
+    "session.search",
+    SessionSearchParams,
+    SessionSearchResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionIdParams {
+    pub id: String,
+}
+
+/// `session.archive`: hides the session from the default list (or
+/// brings it back with `archived: false`). `conflict` while an agent
+/// runs on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionArchiveParams {
+    pub id: String,
+    #[serde(default = "default_true")]
+    pub archived: bool,
+}
+
+method!(
+    SessionArchive,
+    "session.archive",
+    SessionArchiveParams,
+    Empty
+);
+
+/// `session.delete`: removes the stored conversation. The traces stay
+/// (and the row, as `deleted`) unless `purge_traces`, which removes
+/// every event, call and agent of the session and the row itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionDeleteParams {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub purge_traces: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SessionDeleteResult {
+    pub messages_deleted: u64,
+    /// Only with `purge_traces`.
+    #[serde(default)]
+    pub events_deleted: u64,
+}
+
+method!(
+    SessionDelete,
+    "session.delete",
+    SessionDeleteParams,
+    SessionDeleteResult
+);
+
+/// `session.rename`: a title of the user's, which the generator never
+/// replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRenameParams {
+    pub id: String,
+    pub title: String,
+}
+
+method!(SessionRename, "session.rename", SessionRenameParams, Empty);
+
+method!(
+    /// The session as one JSON document (`SessionExport`).
+    SessionExportMethod, "session.export", SessionIdParams, SessionExport
 );
 
 // ---------------------------------------------------------------- agent.*
@@ -596,6 +723,12 @@ pub const ALL_METHODS: &[&str] = &[
     AuthStatus::NAME,
     SessionCreate::NAME,
     SessionList::NAME,
+    SessionGet::NAME,
+    SessionSearch::NAME,
+    SessionArchive::NAME,
+    SessionDelete::NAME,
+    SessionRename::NAME,
+    SessionExportMethod::NAME,
     AgentRun::NAME,
     AgentCancel::NAME,
     AgentSubscribe::NAME,

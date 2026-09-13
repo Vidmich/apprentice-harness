@@ -10,6 +10,11 @@
 //! cancellation. A tool failure never does — it is an error result the
 //! mentor reads. The hook points ([`StepHooks`]) are called at every
 //! step and do nothing until M03.
+//!
+//! Every message appended to the conversation is written through to
+//! `session_messages` as it happens (task M01-10): the assistant turn
+//! with its `assistant.message`, the tool results after the step, so a
+//! daemon that dies mid-run leaves a history the next one resumes.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,12 +38,18 @@ use crate::mentor::{Mentor, MentorError, MentorResponse, StopReason, StreamEvent
 use crate::permissions::{AgentPrompter, Engine, EventSink, PermissionGate, Prompter};
 use crate::stats::{micros_to_usd, price_call};
 use crate::tools::{Executed, Executor, SeenFiles, ToolCall, ToolProgress, ToolResultKind};
-use crate::trace::{CallId, NewEvent, RunStatus, StepRef, format_ts, kinds};
+use crate::trace::{
+    CallId, CallKind, NewEvent, NewMessage, RunStatus, SessionRecord, StepRef, format_ts, kinds,
+};
 use crate::workspace::{Snapshot, SnapshotPhase, Workspace};
 
 /// How long to wait for an overload (or a rate limit without
 /// `retry-after`) to pass before the next attempt.
 pub const DEFAULT_WAIT: Duration = Duration::from_secs(30);
+
+/// Added to the user turn of a resumed session whose tool set differs
+/// from the one its history was made with.
+pub const TOOLS_CHANGED_NOTE: &str = "[note: tool set changed since this session started]";
 
 /// How the run ended, before it is recorded.
 struct Finish {
@@ -88,12 +99,11 @@ impl Finish {
     }
 }
 
-/// Runs the loop for `prompt` on `conversation` and returns the
-/// `agent.finished` event, recorded.
+/// Runs the loop on `conversation`, whose last message is the user
+/// turn of this run, and returns the `agent.finished` event, recorded.
 pub(super) async fn execute(
     state: &Arc<AppState>,
     handle: &AgentHandle,
-    prompt: &str,
     opts: &RunOptions,
     conversation: &mut Conversation,
     hooks: &dyn StepHooks,
@@ -106,7 +116,6 @@ pub(super) async fn execute(
 
     let finish = match Run::setup(state, handle, opts, conversation, hooks).await {
         Ok(mut run) => {
-            conversation.push_user_text(prompt);
             let start = run.snapshot(SnapshotPhase::Start).await;
             let finish = match run.run_loop(conversation).await {
                 Ok(f) => f,
@@ -121,6 +130,41 @@ pub(super) async fn execute(
     };
     if let Some(e) = &finish.error {
         debug!(status = ?finish.status, error = %e.message, kind = e.kind(), "run ended");
+    }
+    // A run that ended between a call and its tools (a trace failure
+    // in the tool step) leaves tool calls without results: not a
+    // history the next request may carry.
+    if let Some(dropped) = conversation.repair() {
+        let keep = conversation.message_count() as u64;
+        let ids: Vec<String> = dropped
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                crate::mentor::ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        warn!(
+            dropped_seq = keep + 1,
+            ?ids,
+            "dropped an assistant turn whose tool calls had no results"
+        );
+        let session = handle.session_id.clone();
+        let agent = agent_id.clone();
+        if let Err(e) = state
+            .writer()
+            .run(move |store| {
+                store.truncate_session_messages(&session, keep)?;
+                store.append(
+                    NewEvent::new(session.clone(), kinds::SESSION_REPAIRED)
+                        .agent(agent)
+                        .payload(json!({ "dropped_seq": keep + 1, "tool_use_ids": ids })),
+                )
+            })
+            .await
+        {
+            warn!(error = %e, "cannot record session.repaired");
+        }
     }
 
     let status = finish.run_status();
@@ -142,6 +186,79 @@ pub(super) async fn execute(
         error: finish.error,
         truncated: finish.truncated,
     }
+}
+
+/// Records what the session runs under (task M01-10): the prompt
+/// version and tool-set hash at the first run; a change since then as
+/// `session.prefix_changed` (a cache miss once) with a note to the
+/// mentor when the tools differ, since the history may name tools that
+/// are gone.
+async fn record_prefix(
+    state: &Arc<AppState>,
+    handle: &AgentHandle,
+    session: &SessionRecord,
+    conversation: &mut Conversation,
+) -> Result<(), RpcError> {
+    let prompt_version = conversation.prompt_version().unwrap_or_default().to_owned();
+    let tools_hash = conversation.tools_hash().unwrap_or_default().to_owned();
+    let (stored_version, stored_hash) = (&session.prompt_version, &session.tools_hash);
+    if stored_version.is_none() && stored_hash.is_none() {
+        let (id, v, h) = (session.id.clone(), prompt_version, tools_hash);
+        state
+            .writer()
+            .run(move |store| store.set_session_prefix(&id, &v, &h))
+            .await?;
+        return Ok(());
+    }
+    let mut changed = serde_json::Map::new();
+    if stored_version.as_deref() != Some(prompt_version.as_str()) {
+        changed.insert(
+            "prompt_version".into(),
+            json!({ "from": stored_version, "to": prompt_version }),
+        );
+    }
+    let tools_differ = stored_hash.as_deref() != Some(tools_hash.as_str());
+    if tools_differ {
+        changed.insert(
+            "tools_hash".into(),
+            json!({ "from": stored_hash, "to": tools_hash }),
+        );
+    }
+    if changed.is_empty() {
+        return Ok(());
+    }
+    info!(session = %session.id, changed = ?changed.keys().collect::<Vec<_>>(), "session prefix changed");
+    let note_row = tools_differ.then(|| {
+        conversation.push_user_text(TOOLS_CHANGED_NOTE);
+        let (seq, msg) = conversation
+            .last_row()
+            .expect("a user turn was just pushed");
+        NewMessage {
+            session: session.id.clone(),
+            seq,
+            role: msg.role,
+            content: msg.content.clone(),
+            agent: Some(handle.agent_id.clone()),
+            step: None,
+        }
+    });
+    let (id, v, h) = (session.id.clone(), prompt_version, tools_hash);
+    let agent = handle.agent_id.clone();
+    state
+        .writer()
+        .run(move |store| {
+            store.set_session_prefix(&id, &v, &h)?;
+            if let Some(row) = &note_row {
+                store.put_session_message(row)?;
+            }
+            store.append(
+                NewEvent::new(id, kinds::SESSION_PREFIX_CHANGED)
+                    .agent(agent)
+                    .payload(Value::Object(changed)),
+            )
+        })
+        .await?;
+    Ok(())
 }
 
 /// Everything one run needs, resolved once before the first step.
@@ -204,11 +321,13 @@ impl<'a> Run<'a> {
         if conversation.system().is_empty() {
             conversation.set_system(build_system(workspace.as_ref(), &config).await);
         }
-        if let Some(old) = conversation.set_tools(state.tools().defs(&config.tools.disabled)) {
+        let tools_changed = conversation
+            .set_tools(state.tools().defs(&config.tools.disabled))
+            .is_some();
+        if tools_changed {
             warn!(
-                old = %old,
                 new = %conversation.tools_hash().unwrap_or_default(),
-                "tool set changed mid-session; the cached prefix is lost"
+                "tool set changed since the session started; the cached prefix is lost"
             );
             handle.emit(Event::AgentWarning {
                 agent_id: agent.clone(),
@@ -218,9 +337,7 @@ impl<'a> Run<'a> {
                     .into(),
             });
         }
-        if conversation.repair() {
-            warn!("dropped an assistant turn whose tool calls had no results");
-        }
+        record_prefix(state, handle, &session, conversation).await?;
         Ok(Self {
             state,
             handle,
@@ -284,6 +401,19 @@ impl<'a> Run<'a> {
     async fn record(&self, ev: NewEvent) -> Result<(), RpcError> {
         self.state.writer().append(ev).await?;
         Ok(())
+    }
+
+    /// The last message of `conv` as its store row.
+    fn row(&self, conv: &Conversation, at: &StepRef) -> NewMessage {
+        let (seq, msg) = conv.last_row().expect("a message was just pushed");
+        NewMessage {
+            session: self.handle.session_id.clone(),
+            seq,
+            role: msg.role,
+            content: msg.content.clone(),
+            agent: Some(at.agent.clone()),
+            step: Some(at.step.clone()),
+        }
     }
 
     /// `outcome {kind: error}` for a run the loop stops itself.
@@ -395,15 +525,18 @@ impl<'a> Run<'a> {
                     }
                     self.continued = true;
                     conv.push_user_text(CONTINUE_MESSAGE);
-                    self.record(
-                        at.event(kinds::USER_MESSAGE)
-                            .payload(json!({
-                                "text_len": CONTINUE_MESSAGE.len(),
-                                "synthetic": "continue",
-                            }))
-                            .blob_bytes(CONTINUE_MESSAGE, "text/plain; charset=utf-8"),
-                    )
-                    .await?;
+                    let row = self.row(conv, &at);
+                    let ev = at
+                        .event(kinds::USER_MESSAGE)
+                        .payload(json!({
+                            "text_len": CONTINUE_MESSAGE.len(),
+                            "synthetic": "continue",
+                        }))
+                        .blob_bytes(CONTINUE_MESSAGE, "text/plain; charset=utf-8");
+                    self.state
+                        .writer()
+                        .run(move |store| store.append_with_message(ev, &row))
+                        .await?;
                 }
                 StopReason::Refusal => {
                     self.finish_step(&at, RunStatus::Ok).await?;
@@ -511,7 +644,14 @@ impl<'a> Run<'a> {
             self.state
                 .writer()
                 .run(move |store| {
-                    store.record_mentor_request(&at, &call_id, &req, &body, version.as_deref())
+                    store.record_mentor_request(
+                        &at,
+                        &call_id,
+                        CallKind::Step,
+                        &req,
+                        &body,
+                        version.as_deref(),
+                    )
                 })
                 .await?;
         }
@@ -595,8 +735,9 @@ impl<'a> Run<'a> {
         }
     }
 
-    /// Records the response, the assistant message and the usage, and
-    /// appends the assistant turn — every block, verbatim.
+    /// Records the response, the assistant message (its event and its
+    /// row) and the usage, and appends the assistant turn — every
+    /// block, verbatim.
     async fn after_response(
         &self,
         conv: &mut Conversation,
@@ -619,18 +760,19 @@ impl<'a> Run<'a> {
                 "tool_calls": tool_names,
             }))
             .blob_bytes(text, "text/plain; charset=utf-8");
+        conv.push_assistant(resp.content.clone());
         {
             let (at, call_id, resp) = (at.clone(), call_id.clone(), resp.clone());
+            let row = self.row(conv, &at);
             self.state
                 .writer()
                 .run(move |store| {
                     store.record_mentor_response(&at, &call_id, &resp, cost_micros)?;
-                    store.append(message)
+                    store.append_with_message(message, &row)
                 })
                 .await?;
         }
         conv.record_usage(resp.usage, cost_micros);
-        conv.push_assistant(resp.content.clone());
         self.emit(Event::AgentUsage {
             agent_id: self.agent.clone(),
             call_id: call_id.to_string(),
@@ -731,6 +873,11 @@ impl<'a> Run<'a> {
         let cancelled = results.iter().any(|r| r.kind == ToolResultKind::Cancelled)
             || self.handle.cancel.is_cancelled();
         conv.push_tool_results(results.into_iter().map(|r| r.block).collect());
+        let row = self.row(conv, at);
+        self.state
+            .writer()
+            .run(move |store| store.put_session_message(&row))
+            .await?;
         self.finish_step(
             at,
             if cancelled {

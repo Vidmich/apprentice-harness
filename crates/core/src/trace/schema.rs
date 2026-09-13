@@ -10,6 +10,7 @@ use super::error::TraceError;
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("migrations/v001.sql")),
     (2, include_str!("migrations/v002.sql")),
+    (3, include_str!("migrations/v003.sql")),
 ];
 
 /// Newest schema version this build understands.
@@ -97,13 +98,14 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&conn).unwrap();
         assert_eq!(version(&conn).unwrap(), 0);
-        assert_eq!(migrate(&mut conn).unwrap(), vec![1, 2]);
+        assert_eq!(migrate(&mut conn).unwrap(), vec![1, 2, 3]);
         assert_eq!(version(&conn).unwrap(), SCHEMA_VERSION);
         assert!(migrate(&mut conn).unwrap().is_empty());
     }
 
-    /// An M00 database (schema v1) with data in it migrates to v2 with
-    /// every row intact and `sessions.workspace_id` NULL.
+    /// An M00 database (schema v1) with data in it migrates to the
+    /// current version with every row intact, `sessions.workspace_id`
+    /// NULL and the v3 columns at their defaults.
     #[test]
     fn v1_database_migrates_without_data_loss() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -123,8 +125,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(migrate(&mut conn).unwrap(), vec![2]);
-        assert_eq!(version(&conn).unwrap(), 2);
+        assert_eq!(migrate(&mut conn).unwrap(), vec![2, 3]);
+        assert_eq!(version(&conn).unwrap(), 3);
         let (title, path, ws): (String, String, Option<String>) = conn
             .query_row(
                 "SELECT title, workspace_path, workspace_id FROM sessions WHERE id = 's1'",
@@ -136,15 +138,28 @@ mod tests {
             (title.as_str(), path.as_str(), ws),
             ("old", "C:/old/repo", None)
         );
-        let counts: (i64, i64, i64) = conn
+        let counts: (i64, i64, i64, i64) = conn
             .query_row(
                 "SELECT (SELECT COUNT(*) FROM events), (SELECT COUNT(*) FROM blobs),
-                        (SELECT COUNT(*) FROM workspaces)",
+                        (SELECT COUNT(*) FROM workspaces),
+                        (SELECT message_count FROM sessions WHERE id = 's1')",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
-        assert_eq!(counts, (1, 1, 0));
+        assert_eq!(counts, (1, 1, 0, 0));
+        conn.execute_batch(
+            "INSERT INTO session_fts(session_id, seq, text) VALUES ('s1', 1, 'hello world');",
+        )
+        .unwrap();
+        let hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_fts WHERE session_fts MATCH 'hello'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1, "fts5 is compiled in");
     }
 
     #[test]

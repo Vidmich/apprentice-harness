@@ -10,6 +10,7 @@ pub mod mentor;
 pub mod permissions;
 pub mod runtime;
 pub mod secrets;
+pub mod sessions;
 pub mod stats;
 pub mod tools;
 pub mod trace;

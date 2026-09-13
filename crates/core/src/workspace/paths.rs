@@ -35,7 +35,10 @@ impl PathError {
 
 /// Canonical form of an existing directory: symlinks resolved, and on
 /// Windows without the `\\?\` prefix and with an upper-case drive letter.
-pub(crate) fn canonical_dir(path: &Path) -> std::io::Result<PathBuf> {
+///
+/// # Errors
+/// The path does not exist or is not a directory.
+pub fn canonical_dir(path: &Path) -> std::io::Result<PathBuf> {
     let canonical = std::fs::canonicalize(path)?;
     if !canonical.is_dir() {
         return Err(std::io::Error::new(

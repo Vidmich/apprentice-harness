@@ -1,13 +1,12 @@
-//! `session.list`, `trace.list` and `trace.get` over the store. The daemon
-//! registers them on its router (task M00-08); `session.create` belongs to
-//! the runtime, which snapshots the resolved config.
+//! `trace.list` and `trace.get` over the store. The daemon registers
+//! them on its router (task M00-08); the `session.*` methods live in
+//! [`crate::sessions`], next to the runtime they talk to.
 
 use std::sync::Arc;
 
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
-    SessionList, SessionListParams, SessionListResult, TraceGet, TraceGetParams, TraceGetResult,
-    TraceList, TraceListParams, TraceListResult,
+    TraceGet, TraceGetParams, TraceGetResult, TraceList, TraceListParams, TraceListResult,
 };
 use apprentice_api::server::{Connection, Router};
 
@@ -27,11 +26,6 @@ impl TraceService {
 
     pub fn store(&self) -> &Arc<TraceStore> {
         &self.store
-    }
-
-    pub fn session_list(&self, p: &SessionListParams) -> Result<SessionListResult, RpcError> {
-        let sessions = self.store.list_sessions(p.limit, p.offset.unwrap_or(0))?;
-        Ok(SessionListResult { sessions })
     }
 
     pub fn trace_list(&self, p: &TraceListParams) -> Result<TraceListResult, RpcError> {
@@ -62,13 +56,8 @@ impl TraceService {
         Ok(TraceGetResult { event, blob })
     }
 
-    /// Registers the three query methods; each runs on the blocking pool.
+    /// Registers the two query methods; each runs on the blocking pool.
     pub fn register(self: Arc<Self>, router: &mut Router) {
-        let svc = Arc::clone(&self);
-        router.add::<SessionList, _, _>(move |_c: Arc<Connection>, p: SessionListParams| {
-            let svc = Arc::clone(&svc);
-            blocking(move || svc.session_list(&p))
-        });
         let svc = Arc::clone(&self);
         router.add::<TraceList, _, _>(move |_c: Arc<Connection>, p: TraceListParams| {
             let svc = Arc::clone(&svc);

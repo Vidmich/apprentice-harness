@@ -84,6 +84,14 @@ impl Conversation {
         }
     }
 
+    /// Seeds the tool-set hash a resumed session started under, so the
+    /// first [`Self::set_tools`] reports whether the set changed.
+    #[must_use]
+    pub fn with_tools_hash(mut self, hash: Option<String>) -> Self {
+        self.tools_hash = hash;
+        self
+    }
+
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
@@ -118,10 +126,12 @@ impl Conversation {
     pub fn set_tools(&mut self, tools: Vec<ToolDef>) -> Option<String> {
         let tools = sorted(tools);
         let hash = hash_tools(&tools);
-        if self.tools_hash.as_deref() == Some(hash.as_str()) {
-            return None;
-        }
-        let old = self.tools_hash.replace(hash);
+        let old = if self.tools_hash.as_deref() == Some(hash.as_str()) {
+            None
+        } else {
+            self.tools_hash.replace(hash)
+        };
+        // Always: a loaded conversation knows its hash before its tools.
         self.tools = tools;
         old
     }
@@ -145,6 +155,13 @@ impl Conversation {
 
     pub fn message_count(&self) -> usize {
         self.messages.len()
+    }
+
+    /// The last message with its row number in the store (index + 1;
+    /// task M01-10 mirrors every message as it is appended).
+    pub fn last_row(&self) -> Option<(u64, &Message)> {
+        let last = self.messages.last()?;
+        Some((self.messages.len() as u64, last))
     }
 
     /// Seeds the running totals (a resumed session starts from what
@@ -242,13 +259,12 @@ impl Conversation {
 
     /// Drops a trailing assistant message whose `tool_use` blocks have
     /// no results (a run cancelled between the call and its tools), so
-    /// the next request is valid. Returns whether anything was dropped.
-    pub fn repair(&mut self) -> bool {
+    /// the next request is valid. Returns the dropped message.
+    pub fn repair(&mut self) -> Option<Message> {
         if self.pending_tool_uses().is_empty() {
-            return false;
+            return None;
         }
-        self.messages.pop();
-        true
+        self.messages.pop()
     }
 
     /// Checks the invariants the API enforces: roles alternate (system
@@ -509,6 +525,20 @@ mod tests {
         assert_ne!(c.tools_hash(), Some(hash.as_str()));
         assert_eq!(c.tools().len(), 1);
         assert_eq!(Conversation::new(SessionId::from("s2")).tools_hash(), None);
+
+        // A loaded conversation starts from its stored hash: the same
+        // set is no change but still the set to send.
+        let mut loaded = Conversation::load(SessionId::from("s3"), Vec::new())
+            .with_tools_hash(Some(hash.clone()));
+        assert!(loaded.tools().is_empty());
+        assert_eq!(
+            loaded.set_tools(vec![tool("read_file"), tool("write_file")]),
+            None
+        );
+        assert_eq!(loaded.tools().len(), 2);
+        let mut loaded = Conversation::load(SessionId::from("s4"), Vec::new())
+            .with_tools_hash(Some(hash.clone()));
+        assert_eq!(loaded.set_tools(vec![tool("read_file")]), Some(hash));
     }
 
     #[test]
@@ -526,8 +556,10 @@ mod tests {
         }]);
         assert_eq!(c.pending_tool_uses().len(), 1);
         assert!(c.validate().unwrap_err().contains("t1 unanswered"));
-        assert!(c.repair());
-        assert!(!c.repair());
+        assert_eq!(c.last_row().unwrap().0, 2);
+        assert!(c.repair().is_some());
+        assert!(c.repair().is_none());
+        assert_eq!(c.last_row().unwrap().0, 1);
         assert_eq!(c.message_count(), 1);
         assert!(c.validate().is_ok());
 

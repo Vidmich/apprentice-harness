@@ -130,16 +130,13 @@ pub async fn prompt_show(
             (None, Some(path)) => Some(state.workspaces().open_root(Path::new(path))?),
             (None, None) => None,
         };
-        let live = state
-            .agents()
-            .conversation(&id)
-            .try_lock()
-            .ok()
-            .filter(|c| !c.system().is_empty())
-            .map(|c| SystemPrompt {
+        let live = state.agents().loaded_conversation(&id).and_then(|conv| {
+            let c = conv.try_lock().ok()?;
+            (!c.system().is_empty()).then(|| SystemPrompt {
                 version: c.prompt_version().unwrap_or(PROMPT_VERSION).to_owned(),
                 blocks: c.system().to_vec(),
-            });
+            })
+        });
         if live.is_some() {
             from_session = Some(id.into_string());
         }

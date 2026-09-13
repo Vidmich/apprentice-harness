@@ -17,6 +17,7 @@ mod payload;
 mod record;
 mod rpc;
 mod schema;
+mod sessions;
 mod store;
 mod writer;
 
@@ -30,6 +31,9 @@ pub use payload::{BLOB_REF_KEY, blob_refs};
 pub use record::StepRef;
 pub use rpc::TraceService;
 pub use schema::SCHEMA_VERSION;
+pub use sessions::{
+    DeleteReport, NewMessage, SessionQuery, StoredMessage, first_prompt_title, fts_query,
+};
 pub use store::{
     AgentRecord, BlobInput, BlobMeta, CallFilter, DiskUsage, EventQuery, GroupBy, GroupedTotals,
     IntegrityReport, MAX_PAGE, MentorCallEnd, MentorCallRow, MentorCallStart, NewAgent, NewEvent,
@@ -63,6 +67,17 @@ pub mod kinds {
     pub const OUTCOME: &str = "outcome";
     pub const FEEDBACK: &str = "feedback";
     pub const WORKSPACE_SNAPSHOT: &str = "workspace.snapshot";
+    /// The session's title changed (task M01-10): `{title, source}`.
+    pub const SESSION_TITLE: &str = "session.title";
+    /// Archived, unarchived or deleted: `{status}`.
+    pub const SESSION_STATUS: &str = "session.status";
+    /// A trailing assistant turn with unanswered tool calls was dropped
+    /// on load: `{dropped_seq, tool_use_ids}`.
+    pub const SESSION_REPAIRED: &str = "session.repaired";
+    /// The prompt version or the tool set differs from the one the
+    /// session started under: `{prompt_version: {from, to}, tools_hash:
+    /// {from, to}}` (absent parts unchanged).
+    pub const SESSION_PREFIX_CHANGED: &str = "session.prefix_changed";
 
     pub const ALL: &[&str] = &[
         SESSION_CREATED,
@@ -81,6 +96,10 @@ pub mod kinds {
         OUTCOME,
         FEEDBACK,
         WORKSPACE_SNAPSHOT,
+        SESSION_TITLE,
+        SESSION_STATUS,
+        SESSION_REPAIRED,
+        SESSION_PREFIX_CHANGED,
     ];
 
     /// `name` or `area.name`, lower-case ASCII letters, digits and
@@ -263,6 +282,9 @@ impl AgentKind {
 pub enum SessionStatus {
     Open,
     Archived,
+    /// Messages gone, the row and its traces kept (`session.delete`
+    /// without `purge_traces`).
+    Deleted,
 }
 
 impl SessionStatus {
@@ -270,6 +292,7 @@ impl SessionStatus {
         match self {
             Self::Open => "open",
             Self::Archived => "archived",
+            Self::Deleted => "deleted",
         }
     }
 
@@ -277,6 +300,66 @@ impl SessionStatus {
         Some(match s {
             "open" => Self::Open,
             "archived" => Self::Archived,
+            "deleted" => Self::Deleted,
+            _ => return None,
+        })
+    }
+}
+
+/// Where a session's title came from (task M01-10). A user's title is
+/// never overwritten by the generator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleSource {
+    User,
+    /// The first 60 characters of the first prompt.
+    Prompt,
+    /// The cheap model's summary after the first answer.
+    Generated,
+}
+
+impl TitleSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Prompt => "prompt",
+            Self::Generated => "generated",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "user" => Self::User,
+            "prompt" => Self::Prompt,
+            "generated" => Self::Generated,
+            _ => return None,
+        })
+    }
+}
+
+/// What a mentor call was for (`mentor_calls.kind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallKind {
+    /// A step of the agent loop.
+    #[default]
+    Step,
+    /// The session title (task M01-10).
+    Title,
+}
+
+impl CallKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Step => "step",
+            Self::Title => "title",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "step" => Self::Step,
+            "title" => Self::Title,
             _ => return None,
         })
     }

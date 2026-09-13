@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex, RwLock};
 pub use git::{GitHead, git_head};
 pub use index::{FileEntry, FileIndex, INDEX_TTL, MAX_INDEX_FILES, language_of};
 pub use manager::Workspaces;
-pub use paths::PathError;
+pub use paths::{PathError, canonical_dir};
 pub use rpc::WorkspaceService;
 pub use rules::{BUILTIN_IGNORES, IgnoreRules};
 pub use snapshot::{

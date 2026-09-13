@@ -1,0 +1,22 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(SessionSearchParams\n{ query: \"hello\".into(), include_archived: false, limit: None, },\nSessionSearchResult\n{\n    hits:\n    vec![SessionSearchHit\n    {\n        session_id: \"s1\".into(), title: Some(\"Add a hello module\".into()),\n        workspace: Some(\"C:/src/repo\".into()), seq: 1, role: \"user\".into(),\n        snippet: \"add [hello]\".into(), created_at:\n        \"2026-09-12T10:00:01.000Z\".into(),\n    }],\n})"
+---
+[
+  {
+    "query": "hello"
+  },
+  {
+    "hits": [
+      {
+        "session_id": "s1",
+        "title": "Add a hello module",
+        "workspace": "C:/src/repo",
+        "seq": 1,
+        "role": "user",
+        "snippet": "add [hello]",
+        "created_at": "2026-09-12T10:00:01.000Z"
+      }
+    ]
+  }
+]

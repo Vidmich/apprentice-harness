@@ -10,6 +10,6 @@ mod cost;
 mod range;
 mod rpc;
 
-pub use cost::{PriceTable, cost_micros, micros_to_usd, price_call};
+pub use cost::{PriceTable, cost_micros, micros_to_usd, price_call, usd_to_micros};
 pub use range::{BoundKind, format_offset, parse_bound};
 pub use rpc::{PricingSource, StatsService, token_stats};

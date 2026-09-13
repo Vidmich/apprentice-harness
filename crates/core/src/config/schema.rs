@@ -20,6 +20,7 @@ pub struct Config {
     pub permissions: PermissionsConfig,
     pub tools: ToolsConfig,
     pub runtime: RuntimeConfig,
+    pub sessions: SessionsConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub struct Config {
 pub struct MentorConfig {
     pub provider: String,
     pub model: String,
+    /// The cheap model that names sessions (task M01-10).
+    pub title_model: String,
     pub effort: Effort,
     pub max_tokens: u32,
     pub thinking_display: ThinkingDisplay,
@@ -46,6 +49,7 @@ impl Default for MentorConfig {
         Self {
             provider: "anthropic".into(),
             model: "claude-opus-5".into(),
+            title_model: "claude-haiku-4-5-20251001".into(),
             effort: Effort::High,
             max_tokens: 64_000,
             thinking_display: ThinkingDisplay::Summarized,
@@ -76,6 +80,21 @@ impl Default for RuntimeConfig {
             max_iterations: 200,
             max_wait_s: 300,
         }
+    }
+}
+
+/// Session bookkeeping (task M01-10).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SessionsConfig {
+    /// After a session's first answer, ask `mentor.title_model` for a
+    /// short title (unless the user set one).
+    pub auto_title: bool,
+}
+
+impl Default for SessionsConfig {
+    fn default() -> Self {
+        Self { auto_title: true }
     }
 }
 

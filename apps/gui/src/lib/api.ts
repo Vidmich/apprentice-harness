@@ -48,12 +48,90 @@ export interface Usage {
 export type ConfigSource = "default" | "user" | "workspace" | "env";
 export type ConfigLayer = "user" | "workspace";
 
+/** `open` | `archived` | `deleted`. */
+export type SessionStatus = "open" | "archived" | "deleted";
+
 export interface SessionSummary {
   id: string;
   title?: string | null;
+  /** The workspace root the session was created on. */
   workspace?: string | null;
+  workspace_id?: string | null;
+  status: SessionStatus;
   created_at: string;
   updated_at: string;
+  /** Messages in the stored conversation. */
+  message_count: number;
+  /** When the last message was stored; the creation time before the first. */
+  last_activity: string;
+  /** How the last agent on the session ended; absent before the first run. */
+  last_agent_status?: AgentStatus;
+  /** Token totals over the session's mentor calls. */
+  usage: Usage;
+  /** Cost of those calls; absent when one had no price. */
+  cost_usd?: number;
+}
+
+/** A session with its resume metadata (`session.get`, `session.export`). */
+export interface SessionInfo extends SessionSummary {
+  /** `user` | `prompt` | `generated`; absent without a title. */
+  title_source?: string;
+  prompt_version?: string;
+  tools_hash?: string;
+  /** The config snapshot taken at creation. */
+  config: unknown;
+}
+
+/** One stored message: the content blocks exactly as the mentor saw them. */
+export interface SessionMessage {
+  /** Position in the conversation, from 1. */
+  seq: number;
+  role: "user" | "assistant" | "system";
+  /** The content-block array. */
+  content: unknown[];
+  agent_id?: string;
+  step_id?: string;
+  created_at: string;
+}
+
+export interface SessionSearchHit {
+  session_id: string;
+  title?: string;
+  workspace?: string;
+  seq: number;
+  role: string;
+  /** The matching text with the matches in `[` `]`, cut with `…`. */
+  snippet: string;
+  created_at: string;
+}
+
+export interface MentorCallInfo {
+  id: string;
+  agent_id: string;
+  step_id: string;
+  /** `step` | `title`. */
+  kind: string;
+  model: string;
+  effort?: string;
+  started_at: string;
+  ended_at?: string;
+  status: "running" | "ok" | "cancelled" | "error";
+  stop_reason?: string;
+  usage?: Usage;
+  cost_usd?: number;
+  first_byte_ms?: number;
+  total_ms?: number;
+}
+
+export const SESSION_EXPORT_FORMAT = "harness-session/1";
+
+/** A session as one JSON document (`session.export`). */
+export interface SessionExport {
+  format: string;
+  exported_at: string;
+  session: SessionInfo;
+  messages: SessionMessage[];
+  mentor_calls: MentorCallInfo[];
 }
 
 export interface EventSummary {
@@ -243,12 +321,69 @@ export interface SessionCreateResult {
 }
 
 export interface SessionListParams {
+  /** Keep sessions whose title or messages contain these words. */
+  query?: string;
+  /** Keep sessions created on this workspace root. */
+  workspace?: string;
+  workspace_id?: string;
+  /** Also archived and deleted sessions. */
+  include_archived?: boolean;
   limit?: number;
   offset?: number;
 }
 
 export interface SessionListResult {
   sessions: SessionSummary[];
+}
+
+export interface SessionGetParams {
+  id: string;
+  /** Messages with `seq` above this (paging forwards). */
+  after_seq?: number;
+  limit?: number;
+}
+
+export interface SessionGetResult {
+  session: SessionInfo;
+  messages: SessionMessage[];
+  has_more?: boolean;
+}
+
+export interface SessionSearchParams {
+  query: string;
+  include_archived?: boolean;
+  limit?: number;
+}
+
+export interface SessionSearchResult {
+  /** Newest first. */
+  hits: SessionSearchHit[];
+}
+
+export interface SessionIdParams {
+  id: string;
+}
+
+export interface SessionArchiveParams {
+  id: string;
+  /** Default true; false reopens. */
+  archived?: boolean;
+}
+
+export interface SessionDeleteParams {
+  id: string;
+  /** Also remove every event, call and agent of the session, and the row. */
+  purge_traces?: boolean;
+}
+
+export interface SessionDeleteResult {
+  messages_deleted: number;
+  events_deleted?: number;
+}
+
+export interface SessionRenameParams {
+  id: string;
+  title: string;
 }
 
 export interface AgentRunParams {
@@ -443,6 +578,12 @@ export interface Methods {
   "auth.status": { params: Empty; result: AuthStatusResult };
   "session.create": { params: SessionCreateParams; result: SessionCreateResult };
   "session.list": { params: SessionListParams; result: SessionListResult };
+  "session.get": { params: SessionGetParams; result: SessionGetResult };
+  "session.search": { params: SessionSearchParams; result: SessionSearchResult };
+  "session.archive": { params: SessionArchiveParams; result: Empty };
+  "session.delete": { params: SessionDeleteParams; result: SessionDeleteResult };
+  "session.rename": { params: SessionRenameParams; result: Empty };
+  "session.export": { params: SessionIdParams; result: SessionExport };
   "agent.run": { params: AgentRunParams; result: AgentRunResult };
   "agent.cancel": { params: AgentIdParams; result: Empty };
   "agent.subscribe": { params: AgentIdParams; result: AgentSubscribeResult };
@@ -481,6 +622,12 @@ export const ALL_METHODS: readonly MethodName[] = [
   "auth.status",
   "session.create",
   "session.list",
+  "session.get",
+  "session.search",
+  "session.archive",
+  "session.delete",
+  "session.rename",
+  "session.export",
   "agent.run",
   "agent.cancel",
   "agent.subscribe",

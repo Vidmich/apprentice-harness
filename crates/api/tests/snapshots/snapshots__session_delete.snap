@@ -1,0 +1,14 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(SessionDeleteParams { id: \"s1\".into(), purge_traces: true, },\nSessionDeleteResult { messages_deleted: 7, events_deleted: 41, })"
+---
+[
+  {
+    "id": "s1",
+    "purge_traces": true
+  },
+  {
+    "messages_deleted": 7,
+    "events_deleted": 41
+  }
+]

@@ -62,7 +62,7 @@ impl Home {
     fn new(mentor: &MockServer) -> Self {
         Self::with_config(
             &format!(
-                "[daemon]\nsecret_store = \"file\"\nidle_shutdown_min = 0\n\n[mentor]\nbase_url = \"{}\"\nmax_retries = 0\ntimeout_s = 30\n",
+                "[daemon]\nsecret_store = \"file\"\nidle_shutdown_min = 0\n\n[sessions]\nauto_title = false\n\n[mentor]\nbase_url = \"{}\"\nmax_retries = 0\ntimeout_s = 30\n",
                 mentor.uri()
             ),
             API_KEY,

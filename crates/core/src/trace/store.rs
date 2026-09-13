@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use apprentice_api::types::{EventSummary, SessionSummary, TraceEvent, Usage};
+use apprentice_api::types::{EventSummary, TraceEvent, Usage};
 use apprentice_common::paths::Paths;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde_json::Value;
@@ -14,8 +14,8 @@ use super::blobs::BlobFiles;
 use super::error::TraceError;
 use super::payload::{SPILLED_MEDIA_TYPE, blob_refs, spill_strings};
 use super::{
-    AgentId, AgentKind, BLOB_DIR, BlobId, CallId, DB_FILE, EventId, RunStatus, SessionId,
-    SessionStatus, StepId, WorkspaceId, kinds, now_ts, schema,
+    AgentId, AgentKind, BLOB_DIR, BlobId, CallId, CallKind, DB_FILE, EventId, RunStatus, SessionId,
+    SessionStatus, StepId, TitleSource, WorkspaceId, kinds, now_ts, schema,
 };
 use crate::config::TraceConfig;
 
@@ -23,7 +23,7 @@ type Result<T> = std::result::Result<T, TraceError>;
 
 /// Upper bound on `limit` for list queries.
 pub const MAX_PAGE: u32 = 10_000;
-const DEFAULT_PAGE: u32 = 200;
+pub(super) const DEFAULT_PAGE: u32 = 200;
 
 // ------------------------------------------------------------------ inputs
 
@@ -140,6 +140,8 @@ pub struct MentorCallStart {
     pub request_bytes: Option<u64>,
     /// Store timestamp; `None` = now. Set by imports and tests.
     pub started_at: Option<String>,
+    /// A loop step, or the session title (task M01-10).
+    pub kind: CallKind,
 }
 
 /// Update of `mentor_calls` when a call ends.
@@ -181,10 +183,20 @@ pub struct SessionRecord {
     pub created_at: String,
     pub updated_at: String,
     pub title: Option<String>,
+    /// `None` until a title is set (task M01-10).
+    pub title_source: Option<TitleSource>,
     pub workspace_path: Option<String>,
     pub workspace_id: Option<WorkspaceId>,
     pub config: Value,
     pub status: SessionStatus,
+    /// Rows in `session_messages`.
+    pub message_count: u64,
+    /// How the last agent on the session ended.
+    pub last_agent_status: Option<RunStatus>,
+    /// The prompt version and tool set the session started under, set
+    /// at its first run.
+    pub prompt_version: Option<String>,
+    pub tools_hash: Option<String>,
 }
 
 /// A registered workspace (schema v2).
@@ -253,6 +265,7 @@ pub struct MentorCallRow {
     pub total_ms: Option<u64>,
     pub request_bytes: Option<u64>,
     pub apprentice_applied: bool,
+    pub kind: CallKind,
 }
 
 // ----------------------------------------------------------------- queries
@@ -391,8 +404,8 @@ impl DiskUsage {
 
 /// Event prepared outside the lock: kind validated, oversized strings and
 /// the primary blob already on disk, rows to register collected.
-struct Prepared {
-    ev: NewEvent,
+pub(super) struct Prepared {
+    pub(super) ev: NewEvent,
     blob_id: Option<BlobId>,
     /// `(id, size, media_type)` for blobs written from bytes.
     register: Vec<(BlobId, usize, String)>,
@@ -467,7 +480,7 @@ impl TraceStore {
         schema::version(&self.lock())
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
+    pub(super) fn lock(&self) -> MutexGuard<'_, Connection> {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -489,12 +502,14 @@ impl TraceStore {
         let mut conn = self.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "INSERT INTO sessions(id, created_at, updated_at, title, workspace_path, workspace_id, config_json, status)
-             VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, 'open')",
+            "INSERT INTO sessions(id, created_at, updated_at, title, title_source, workspace_path,
+                                  workspace_id, config_json, status)
+             VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, 'open')",
             params![
                 id,
                 now,
                 s.title,
+                s.title.as_ref().map(|_| TitleSource::User.as_str()),
                 s.workspace_path,
                 s.workspace_id,
                 s.config.to_string()
@@ -514,32 +529,12 @@ impl TraceStore {
     pub fn get_session(&self, id: &SessionId) -> Result<SessionRecord> {
         self.lock()
             .query_row(
-                "SELECT id, created_at, updated_at, title, workspace_path, config_json, status, workspace_id
-                 FROM sessions WHERE id = ?1",
+                &format!("{SESSION_COLUMNS} WHERE id = ?1"),
                 params![id],
                 session_record,
             )
             .optional()?
             .ok_or_else(|| TraceError::not_found("session", id.as_str()))
-    }
-
-    /// Newest first (by `updated_at`).
-    pub fn list_sessions(&self, limit: Option<u32>, offset: u32) -> Result<Vec<SessionSummary>> {
-        let conn = self.lock();
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, title, workspace_path, created_at, updated_at FROM sessions
-             ORDER BY updated_at DESC, id DESC LIMIT ?1 OFFSET ?2",
-        )?;
-        let rows = stmt.query_map(params![page(limit), offset], |r| {
-            Ok(SessionSummary {
-                id: r.get(0)?,
-                title: r.get(1)?,
-                workspace: r.get(2)?,
-                created_at: r.get(3)?,
-                updated_at: r.get(4)?,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Number of sessions with `status`.
@@ -560,10 +555,47 @@ impl TraceStore {
         require_row(n, "session", id.as_str())
     }
 
-    pub fn set_session_title(&self, id: &SessionId, title: Option<&str>) -> Result<()> {
+    /// Sets the title and where it came from. A generated title never
+    /// replaces the user's: the update is skipped (and `false`
+    /// returned) when the stored source is `user` and `source` is not.
+    pub fn set_session_title(
+        &self,
+        id: &SessionId,
+        title: Option<&str>,
+        source: TitleSource,
+    ) -> Result<bool> {
+        let conn = self.lock();
+        let n = conn.execute(
+            "UPDATE sessions SET title = ?2, title_source = ?3, updated_at = ?4
+             WHERE id = ?1 AND (title_source IS NULL OR title_source != 'user' OR ?3 = 'user')",
+            params![id, title, source.as_str(), now_ts()],
+        )?;
+        if n > 0 {
+            return Ok(true);
+        }
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sessions WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )?;
+        if exists {
+            Ok(false)
+        } else {
+            Err(TraceError::not_found("session", id.as_str()))
+        }
+    }
+
+    /// Records the prompt version and tool set a session runs under
+    /// (task M01-10); read back on resume.
+    pub fn set_session_prefix(
+        &self,
+        id: &SessionId,
+        prompt_version: &str,
+        tools_hash: &str,
+    ) -> Result<()> {
         let n = self.lock().execute(
-            "UPDATE sessions SET title = ?2, updated_at = ?3 WHERE id = ?1",
-            params![id, title, now_ts()],
+            "UPDATE sessions SET prompt_version = ?2, tools_hash = ?3 WHERE id = ?1",
+            params![id, prompt_version, tools_hash],
         )?;
         require_row(n, "session", id.as_str())
     }
@@ -603,7 +635,8 @@ impl TraceStore {
         Ok(id)
     }
 
-    /// Marks the agent ended and appends `agent.finished {status, error?}`.
+    /// Marks the agent ended, appends `agent.finished {status, error?}`
+    /// and remembers the status on the session.
     pub fn finish_agent(
         &self,
         id: &AgentId,
@@ -611,6 +644,7 @@ impl TraceStore {
         error: Option<Value>,
     ) -> Result<()> {
         let session = self.get_agent(id)?.session_id;
+        let session_for_status = session.clone();
         let mut payload = serde_json::json!({ "status": status });
         if let Some(err) = error {
             payload["error"] = err;
@@ -627,6 +661,10 @@ impl TraceStore {
             params![id, status.as_str(), now_ts()],
         )?;
         require_row(n, "agent", id.as_str())?;
+        tx.execute(
+            "UPDATE sessions SET last_agent_status = ?2, updated_at = ?3 WHERE id = ?1",
+            params![session_for_status, status.as_str(), now_ts()],
+        )?;
         insert_event(&tx, finished)?;
         tx.commit()?;
         Ok(())
@@ -1266,7 +1304,7 @@ impl TraceStore {
     // ------------------------------------------------------------ internal
 
     /// Validates the kind and moves large data to blob files. No lock held.
-    fn prepare(&self, mut ev: NewEvent) -> Result<Prepared> {
+    pub(super) fn prepare(&self, mut ev: NewEvent) -> Result<Prepared> {
         if !kinds::is_valid(&ev.kind) {
             return Err(TraceError::invalid(
                 "event kind",
@@ -1366,11 +1404,11 @@ fn default_workspace_name(root: &str) -> String {
         .to_owned()
 }
 
-fn page(limit: Option<u32>) -> u32 {
+pub(super) fn page(limit: Option<u32>) -> u32 {
     limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE)
 }
 
-fn require_row(n: usize, what: &'static str, id: &str) -> Result<()> {
+pub(super) fn require_row(n: usize, what: &'static str, id: &str) -> Result<()> {
     if n == 0 {
         Err(TraceError::not_found(what, id))
     } else {
@@ -1378,7 +1416,7 @@ fn require_row(n: usize, what: &'static str, id: &str) -> Result<()> {
     }
 }
 
-fn get_u64(r: &Row<'_>, idx: usize) -> rusqlite::Result<u64> {
+pub(super) fn get_u64(r: &Row<'_>, idx: usize) -> rusqlite::Result<u64> {
     let v: i64 = r.get(idx)?;
     Ok(u64::try_from(v).unwrap_or(0))
 }
@@ -1388,7 +1426,7 @@ fn get_opt_u64(r: &Row<'_>, idx: usize) -> rusqlite::Result<Option<u64>> {
     Ok(v.map(|v| u64::try_from(v).unwrap_or(0)))
 }
 
-fn to_i64(v: u64) -> i64 {
+pub(super) fn to_i64(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
 }
 
@@ -1396,11 +1434,11 @@ fn size_i64(n: usize) -> i64 {
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-fn parse_status(s: &str) -> rusqlite::Result<RunStatus> {
+pub(super) fn parse_status(s: &str) -> rusqlite::Result<RunStatus> {
     RunStatus::parse(s).ok_or_else(|| bad_column("status", s))
 }
 
-fn bad_column(column: &str, value: &str) -> rusqlite::Error {
+pub(super) fn bad_column(column: &str, value: &str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         0,
         rusqlite::types::Type::Text,
@@ -1408,23 +1446,37 @@ fn bad_column(column: &str, value: &str) -> rusqlite::Error {
     )
 }
 
-fn parse_json(s: &str) -> rusqlite::Result<Value> {
+pub(super) fn parse_json(s: &str) -> rusqlite::Result<Value> {
     serde_json::from_str(s).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     })
 }
 
-fn session_record(r: &Row<'_>) -> rusqlite::Result<SessionRecord> {
+pub(super) const SESSION_COLUMNS: &str =
+    "SELECT id, created_at, updated_at, title, workspace_path, config_json, status, workspace_id,
+            title_source, message_count, last_agent_status, prompt_version, tools_hash
+     FROM sessions";
+
+pub(super) fn session_record(r: &Row<'_>) -> rusqlite::Result<SessionRecord> {
     let status: String = r.get(6)?;
+    let title_source: Option<String> = r.get(8)?;
+    let last_status: Option<String> = r.get(10)?;
     Ok(SessionRecord {
         id: r.get(0)?,
         created_at: r.get(1)?,
         updated_at: r.get(2)?,
         title: r.get(3)?,
+        title_source: title_source
+            .map(|s| TitleSource::parse(&s).ok_or_else(|| bad_column("title_source", &s)))
+            .transpose()?,
         workspace_path: r.get(4)?,
         workspace_id: r.get(7)?,
         config: parse_json(&r.get::<_, String>(5)?)?,
         status: SessionStatus::parse(&status).ok_or_else(|| bad_column("status", &status))?,
+        message_count: get_u64(r, 9)?,
+        last_agent_status: last_status.map(|s| parse_status(&s)).transpose()?,
+        prompt_version: r.get(11)?,
+        tools_hash: r.get(12)?,
     })
 }
 
@@ -1488,15 +1540,16 @@ fn trace_event(r: &Row<'_>) -> rusqlite::Result<TraceEvent> {
     })
 }
 
-const MENTOR_CALL_COLUMNS: &str =
+pub(super) const MENTOR_CALL_COLUMNS: &str =
     "SELECT id, session_id, agent_id, step_id, request_event_id, response_event_id,
             model, effort, started_at, ended_at, status, stop_reason, http_status,
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            cost_micros, first_byte_ms, total_ms, request_bytes, apprentice_applied
+            cost_micros, first_byte_ms, total_ms, request_bytes, apprentice_applied, kind
      FROM mentor_calls c";
 
-fn mentor_call_row(r: &Row<'_>) -> rusqlite::Result<MentorCallRow> {
+pub(super) fn mentor_call_row(r: &Row<'_>) -> rusqlite::Result<MentorCallRow> {
     let status: String = r.get(10)?;
+    let kind: String = r.get(22)?;
     let input: Option<i64> = r.get(13)?;
     let usage = input.map(|_| {
         Ok::<_, rusqlite::Error>(Usage {
@@ -1528,6 +1581,7 @@ fn mentor_call_row(r: &Row<'_>) -> rusqlite::Result<MentorCallRow> {
         total_ms: get_opt_u64(r, 19)?,
         request_bytes: get_opt_u64(r, 20)?,
         apprentice_applied: r.get::<_, i64>(21)? != 0,
+        kind: CallKind::parse(&kind).ok_or_else(|| bad_column("kind", &kind))?,
     })
 }
 
@@ -1541,7 +1595,7 @@ fn register_blob(conn: &Connection, id: &BlobId, size: usize, media_type: &str) 
     Ok(())
 }
 
-fn insert_event(conn: &Connection, p: Prepared) -> Result<EventId> {
+pub(super) fn insert_event(conn: &Connection, p: Prepared) -> Result<EventId> {
     let Prepared {
         ev,
         blob_id,
@@ -1586,11 +1640,11 @@ fn insert_event(conn: &Connection, p: Prepared) -> Result<EventId> {
     Ok(id)
 }
 
-fn insert_mentor_call(conn: &Connection, c: &MentorCallStart) -> Result<()> {
+pub(super) fn insert_mentor_call(conn: &Connection, c: &MentorCallStart) -> Result<()> {
     conn.prepare_cached(
         "INSERT INTO mentor_calls(id, session_id, agent_id, step_id, request_event_id, model, effort,
-                                  started_at, status, request_bytes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9)",
+                                  started_at, status, request_bytes, kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9, ?10)",
     )?
     .execute(params![
         c.id,
@@ -1602,11 +1656,12 @@ fn insert_mentor_call(conn: &Connection, c: &MentorCallStart) -> Result<()> {
         c.effort,
         c.started_at.clone().unwrap_or_else(now_ts),
         c.request_bytes.map(to_i64),
+        c.kind.as_str(),
     ])?;
     Ok(())
 }
 
-fn update_mentor_call(conn: &Connection, c: &MentorCallEnd) -> Result<()> {
+pub(super) fn update_mentor_call(conn: &Connection, c: &MentorCallEnd) -> Result<()> {
     let n = conn
         .prepare_cached(
             "UPDATE mentor_calls SET response_event_id = ?2, status = ?3, ended_at = ?4,
@@ -1633,7 +1688,7 @@ fn update_mentor_call(conn: &Connection, c: &MentorCallEnd) -> Result<()> {
     require_row(n, "mentor call", c.id.as_str())
 }
 
-type SqlArgs = Vec<rusqlite::types::Value>;
+pub(super) type SqlArgs = Vec<rusqlite::types::Value>;
 /// `(id, kind, payload_json, blob_id)` as scanned by `integrity_check`.
 type EventRow = (EventId, String, String, Option<BlobId>);
 

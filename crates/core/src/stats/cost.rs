@@ -50,6 +50,15 @@ pub fn micros_to_usd(micros: i64) -> f64 {
     micros as f64 / 1e6
 }
 
+/// The inverse of [`micros_to_usd`] (session imports).
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a rounded cost in micro-dollars fits i64"
+)]
+pub fn usd_to_micros(usd: f64) -> i64 {
+    (usd * 1e6).round() as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

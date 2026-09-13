@@ -14,6 +14,14 @@ import {
   KNOWN_EVENT_TYPES,
   type PromptShowParams,
   type PromptShowResult,
+  SESSION_EXPORT_FORMAT,
+  type SessionExport,
+  type SessionGetParams,
+  type SessionGetResult,
+  type SessionListParams,
+  type SessionListResult,
+  type SessionSearchParams,
+  type SessionSearchResult,
   type TokenStats,
   type ToolsListResult,
   type WorkspaceAddParams,
@@ -113,6 +121,24 @@ describe("api.ts against the Rust snapshots", () => {
     expect(result.tokens).toBe(1042);
   });
 
+  it("reads sessions, their messages, search hits and an export", () => {
+    const [listParams, list] = snapshot("session_list") as [SessionListParams, SessionListResult];
+    expect(listParams.query).toBe("hello");
+    expect(list.sessions[0]?.status).toBe("open");
+    expect(list.sessions[0]?.message_count).toBe(7);
+    expect(list.sessions[0]?.last_agent_status).toBe("ok");
+    expect(list.sessions[0]?.cost_usd).toBe(0.0138);
+    const [, got] = snapshot("session_get") as [SessionGetParams, SessionGetResult];
+    expect(got.session.prompt_version).toBe("mentor_system_v1");
+    expect(got.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(got.has_more).toBe(true);
+    const [, search] = snapshot("session_search") as [SessionSearchParams, SessionSearchResult];
+    expect(search.hits[0]?.snippet).toContain("[hello]");
+    const exported = snapshot("session_export") as SessionExport;
+    expect(exported.format).toBe(SESSION_EXPORT_FORMAT);
+    expect(exported.mentor_calls[0]?.kind).toBe("title");
+  });
+
   it("reads workspace info", () => {
     const info = snapshot("workspace_info") as WorkspaceInfoResult;
     expect(info.file_count).toBe(1234);
@@ -125,7 +151,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(28);
+    expect(ALL_METHODS.length).toBe(34);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

@@ -12,8 +12,8 @@ use apprentice_common::paths::Paths;
 use apprentice_core::config::Pricing;
 use apprentice_core::stats::{PriceTable, StatsService, price_call};
 use apprentice_core::trace::{
-    CallId, MentorCallEnd, MentorCallStart, NewAgent, NewEvent, NewSession, RunStatus, SessionId,
-    TraceStore, kinds,
+    CallId, CallKind, MentorCallEnd, MentorCallStart, NewAgent, NewEvent, NewSession, RunStatus,
+    SessionId, TraceStore, kinds,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -92,6 +92,7 @@ fn call(
             effort: None,
             request_bytes: Some(2),
             started_at: Some(started_at.into()),
+            kind: CallKind::Step,
         })
         .unwrap();
     store

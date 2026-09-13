@@ -629,11 +629,12 @@ fn migration_v002_applies_to_an_m00_database() {
 
     let store = TraceStore::open(&paths).unwrap();
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
-    assert_eq!(SCHEMA_VERSION, 2);
     let session = store.get_session(&"s1".into()).unwrap();
     assert_eq!(session.title.as_deref(), Some("old"));
     assert_eq!(session.workspace_path.as_deref(), Some("C:/old/repo"));
     assert_eq!(session.workspace_id, None);
+    assert_eq!(session.title_source, None, "v3 columns default");
+    assert_eq!(session.message_count, 0);
     assert_eq!(store.event_count(&"s1".into()).unwrap(), 1);
     assert!(store.list_workspaces().unwrap().is_empty());
     let usage = store.disk_usage().unwrap();

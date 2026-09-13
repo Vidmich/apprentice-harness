@@ -17,7 +17,7 @@ use apprentice_api::events::{AgentStatus, Event, LogLevel, Risk};
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
     AgentCancel, AgentIdParams, AgentRun, AgentRunParams, PermissionRespond,
-    PermissionRespondParams, SessionCreate, SessionCreateParams,
+    PermissionRespondParams, SessionCreate, SessionCreateParams, SessionList, SessionListParams,
 };
 use apprentice_api::types::{
     Effort, PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource, RuleSpec,
@@ -38,16 +38,21 @@ use crate::{Ctx, Exit};
 Examples:
   harness run \"summarise the failing tests\"
   harness run --session 0192abc \"now fix the first one\"
+  harness run --last \"and the second\"
   harness run --workspace ~/proj --effort high --no-apprentice \"review src/lib.rs\"
   harness run --permission-mode plan \"how is the config loaded?\"
   harness --json run \"say hi\" | jq -c 'select(.type == \"result\")'")]
+#[allow(clippy::struct_excessive_bools)] // flags, each its own switch
 pub struct RunArgs {
     /// The task for the mentor.
     prompt: String,
     /// Continue an existing session instead of creating one.
-    #[arg(long, value_name = "ID", conflicts_with = "workspace")]
+    #[arg(long, value_name = "ID", conflicts_with_all = ["workspace", "last"])]
     session: Option<String>,
-    /// Workspace root for the new session (default: current directory).
+    /// Continue the most recent session of the workspace.
+    #[arg(long)]
+    last: bool,
+    /// Workspace root for the session (default: current directory).
     #[arg(long, value_name = "DIR")]
     workspace: Option<PathBuf>,
     /// Mentor model for this run (default: `mentor.model` from config).
@@ -153,6 +158,28 @@ async fn stream(
     let out = ctx.out;
     let session_id = if let Some(id) = &args.session {
         id.clone()
+    } else if args.last {
+        let workspace = args.workspace.clone().unwrap_or_else(|| PathBuf::from("."));
+        let r = client
+            .call::<SessionList>(SessionListParams {
+                workspace: Some(workspace_string(&workspace)?),
+                limit: Some(1),
+                ..SessionListParams::default()
+            })
+            .await
+            .context("listing sessions")?;
+        let Some(last) = r.sessions.into_iter().next() else {
+            anyhow::bail!(
+                "no session on {} yet; run without --last to start one",
+                workspace_string(&workspace)?
+            );
+        };
+        out.info(format!(
+            "session {} · {}",
+            last.id,
+            last.title.as_deref().unwrap_or("(untitled)")
+        ));
+        last.id
     } else {
         let workspace = args.workspace.clone().unwrap_or_else(|| PathBuf::from("."));
         let r = client

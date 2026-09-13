@@ -50,16 +50,139 @@ pub enum ConfigLayer {
     Workspace,
 }
 
-/// Session row as listed by `session.list`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Session row as listed by `session.list` (task M01-10 added the
+/// activity and cost columns).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionSummary {
     pub id: String,
     #[serde(default)]
     pub title: Option<String>,
+    /// The workspace root the session was created on.
     #[serde(default)]
     pub workspace: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    /// `open` | `archived` | `deleted`.
+    #[serde(default = "default_session_status")]
+    pub status: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Messages in the stored conversation.
+    #[serde(default)]
+    pub message_count: u64,
+    /// When the last message was stored; the creation time before the
+    /// first.
+    #[serde(default)]
+    pub last_activity: String,
+    /// How the last agent on the session ended; absent before the
+    /// first run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_agent_status: Option<crate::events::AgentStatus>,
+    /// Token totals over the session's mentor calls.
+    #[serde(default)]
+    pub usage: Usage,
+    /// Cost of those calls; absent when one had no price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+fn default_session_status() -> String {
+    "open".to_owned()
+}
+
+/// A session with its resume metadata, as `session.get` and
+/// `session.export` return it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    #[serde(flatten)]
+    pub summary: SessionSummary,
+    /// `user` | `prompt` | `generated`; absent without a title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_source: Option<String>,
+    /// The system prompt version and the tool-set hash the session
+    /// started under (set at its first run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_hash: Option<String>,
+    /// The config snapshot taken at creation.
+    pub config: Value,
+}
+
+/// One stored message of a conversation: the content blocks exactly as
+/// the mentor sent or received them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMessage {
+    /// Position in the conversation, from 1.
+    pub seq: u64,
+    /// `user` | `assistant` | `system`.
+    pub role: String,
+    /// The content-block array.
+    pub content: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
+    pub created_at: String,
+}
+
+/// A `session.search` hit: one message whose text matched.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionSearchHit {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    pub seq: u64,
+    pub role: String,
+    /// The matching text with the matches in `[` `]`, cut with `…`.
+    pub snippet: String,
+    pub created_at: String,
+}
+
+/// One mentor call of a session, as `session.export` lists them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MentorCallInfo {
+    pub id: String,
+    pub agent_id: String,
+    pub step_id: String,
+    /// `step` | `title`.
+    pub kind: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    /// `running` | `ok` | `cancelled` | `error`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_byte_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_ms: Option<u64>,
+}
+
+/// Current value of [`SessionExport::format`].
+pub const SESSION_EXPORT_FORMAT: &str = "harness-session/1";
+
+/// A session as one JSON document (`session.export`): enough to list,
+/// resume and account for it in another store. Traces are not included
+/// (a trace bundle is the M01-14 export).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionExport {
+    /// [`SESSION_EXPORT_FORMAT`].
+    pub format: String,
+    pub exported_at: String,
+    pub session: SessionInfo,
+    pub messages: Vec<SessionMessage>,
+    pub mentor_calls: Vec<MentorCallInfo>,
 }
 
 /// A registered workspace, as returned by `workspace.add` and listed by
