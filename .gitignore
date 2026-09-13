@@ -26,3 +26,4 @@ ml/.pytest_cache/
 ml/.ruff_cache/
 .harness/
 *.log
+.claude/

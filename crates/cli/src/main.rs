@@ -466,6 +466,7 @@ mod tests {
             vec![
                 "session", "show", "s1", "--after", "3", "--limit", "10", "--full",
             ],
+            vec!["session", "show", "s1", "--tail", "--limit", "10"],
             vec!["session", "search", "hello world", "--limit", "5"],
             vec!["session", "rename", "s1", "A title"],
             vec!["session", "archive", "s1", "--undo"],
@@ -478,6 +479,10 @@ mod tests {
             assert!(matches!(c.command, Command::Session(_)));
         }
         assert!(Cli::try_parse_from(["harness", "session", "rename", "s1"]).is_err());
+        assert!(
+            Cli::try_parse_from(["harness", "session", "show", "s1", "--tail", "--after", "2"])
+                .is_err()
+        );
     }
 
     #[test]

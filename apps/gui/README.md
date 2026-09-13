@@ -28,6 +28,18 @@ the terminal that started `tauri dev`.
 (including `crates/`), killing the whole process tree — the daemon it
 spawned included; the restarted app spawns a fresh one.
 
+`pnpm dev` alone serves the page to a plain browser at
+`http://localhost:1420`. Outside Tauri the page talks to the scripted
+mock daemon in `src/lib/mock.ts` instead of `harnessd`: sessions,
+`agent.run` with a canned streamed answer (thinking, markdown, a read,
+an edit with a diff, a shell with streamed output), cancel, reattach
+after a reload, and the trace events behind the Raw tab. Words in the
+prompt steer it: `fail` (an error before any tool, for Retry), `slow`
+(a minute-long shell, for Cancel and reload), `big` (5 MB of shell
+output), `warn` (a warning in the footer). It costs no tokens and is
+where the chat view's rendering is worked on; the real daemon is only
+reachable from the app. `TESTING.md` is the manual checklist for both.
+
 ## How it is wired
 
 - `src-tauri/src/daemon.rs` — connection manager. Connects through
@@ -46,9 +58,28 @@ spawned included; the restarted app spawns a fresh one.
 - `src/lib/api.ts` — hand-written types mirroring `crates/api`. `api.test.ts`
   parses the Rust snapshot JSON (`crates/api/tests/snapshots`) against
   them, so a wire change on the Rust side fails the GUI tests.
-- `src/lib/rpc.ts` (`call`, `stream`), `src/lib/events.ts` (`subscribe`,
-  `onDaemonStatus`), `src/lib/run.ts` (the pure reducer behind the
-  Playground), `src/store.ts` (Zustand).
+- `src/lib/bridge.ts` — `invoke`/`listen`: Tauri's in the app, the mock's
+  in a browser. `src/lib/rpc.ts` (`call`, `stream`) and `src/lib/events.ts`
+  (`subscribe`, `onDaemonStatus`) sit on it.
+- `src/lib/transcript.ts` — the pure reducer behind the chat view: the
+  stored rows of `session.get` plus a live overlay folded from the run's
+  events, derived into a flat item list (user, assistant text, thinking,
+  tool card, turn footer, error). `transcript.test.ts` covers it.
+- `src/lib/chat.ts` — the effects: open a session (newest page first,
+  older pages on scroll), send (`agent.run`), cancel, reattach to a run
+  after a reload (`agent.subscribe`; the stored rows fill the gap at the
+  next step boundary), refresh at step boundaries, and the raw output of
+  a tool call from the trace (`trace.list` + `trace.get`). Events are
+  folded in batches so a fast stream costs one render per frame.
+- `src/store.ts` (app state, the chats — persisted in `localStorage` so a
+  reload finds its sessions — and the composer settings),
+  `src/stores/transcripts.ts` (one transcript per session, the five most
+  recent kept).
+- `src/components/chat/` — `TranscriptView` (sticks to the bottom,
+  virtualises above 200 items), `Markdown` + `CodeBlock` (react-markdown,
+  Shiki loaded on first use, both themes as CSS variables), `ToolCard`
+  (Input / Result / Raw / Diff / Console tabs), `DiffView`, `RawView`
+  (virtualised lines, megabytes are fine), `Console`, `Composer`.
 
 The frontend holds no business logic and never stores the API key: the
 Setup screen sends it to `auth.set_key` and forgets it.

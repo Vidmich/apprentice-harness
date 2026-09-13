@@ -109,6 +109,30 @@ pub struct SessionInfo {
     pub config: Value,
 }
 
+/// One agent (run) of a session with what its mentor calls cost, as
+/// `session.get` lists them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentSummary {
+    pub id: String,
+    /// `running` | `ok` | `cancelled` | `error`.
+    pub status: String,
+    pub started_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    /// The model of the agent's step calls; absent before the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Mentor calls made so far.
+    #[serde(default)]
+    pub calls: u64,
+    /// Token totals over those calls.
+    #[serde(default)]
+    pub usage: Usage,
+    /// Cost of those calls; absent when one had no price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
 /// One stored message of a conversation: the content blocks exactly as
 /// the mentor sent or received them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

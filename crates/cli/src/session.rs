@@ -74,8 +74,11 @@ pub struct ShowArgs {
     /// The session.
     id: String,
     /// Messages with a position above this.
-    #[arg(long, value_name = "SEQ")]
+    #[arg(long, value_name = "SEQ", conflicts_with = "tail")]
     after: Option<u64>,
+    /// The newest messages instead of the oldest (with --limit).
+    #[arg(long)]
+    tail: bool,
     /// Maximum number of messages.
     #[arg(long, value_name = "N")]
     limit: Option<u32>,
@@ -291,6 +294,7 @@ fn show(ctx: &Ctx, a: &ShowArgs) -> anyhow::Result<()> {
     let params = SessionGetParams {
         id: a.id.clone(),
         after_seq: a.after,
+        before_seq: a.tail.then_some(u64::MAX),
         limit: a.limit,
     };
     let r = with_client(

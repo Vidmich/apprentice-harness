@@ -82,6 +82,24 @@ export interface SessionInfo extends SessionSummary {
   config: unknown;
 }
 
+/** How the mentor's thinking is shown (`mentor.thinking_display`). */
+export type ThinkingDisplay = "summarized" | "omitted";
+
+/** One agent (run) of a session with what its mentor calls cost. */
+export interface AgentSummary {
+  id: string;
+  status: "running" | AgentStatus;
+  started_at: string;
+  ended_at?: string;
+  /** The model of the agent's step calls; absent before the first. */
+  model?: string;
+  /** Mentor calls made so far. */
+  calls: number;
+  usage: Usage;
+  /** Cost of those calls; absent when one had no price. */
+  cost_usd?: number;
+}
+
 /** One stored message: the content blocks exactly as the mentor saw them. */
 export interface SessionMessage {
   /** Position in the conversation, from 1. */
@@ -340,13 +358,19 @@ export interface SessionGetParams {
   id: string;
   /** Messages with `seq` above this (paging forwards). */
   after_seq?: number;
+  /** Messages with `seq` below this (the newest page first); wins over `after_seq`. */
+  before_seq?: number;
   limit?: number;
 }
 
 export interface SessionGetResult {
   session: SessionInfo;
+  /** The page, oldest first whichever way it was paged. */
   messages: SessionMessage[];
+  /** More messages follow the page (`after_seq`) or precede it (`before_seq`). */
   has_more?: boolean;
+  /** Every agent of the session, oldest first (absent when none ran). */
+  agents?: AgentSummary[];
 }
 
 export interface SessionSearchParams {
@@ -681,6 +705,8 @@ export type KnownEvent =
       blob_id?: string;
       /** Length of the result text the mentor receives. */
       mentor_bytes?: number;
+      /** The `tool.result` trace event; its blob is the raw output. */
+      event_id?: string;
     }
   | {
       type: "agent.usage";

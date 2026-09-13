@@ -8,8 +8,8 @@
 
 use apprentice_api::events::AgentStatus;
 use apprentice_api::types::{
-    MentorCallInfo, SESSION_EXPORT_FORMAT, SessionExport, SessionInfo, SessionMessage,
-    SessionSearchHit, SessionSummary, Usage,
+    AgentSummary, MentorCallInfo, SESSION_EXPORT_FORMAT, SessionExport, SessionInfo,
+    SessionMessage, SessionSearchHit, SessionSummary, Usage,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serde_json::Value;
@@ -137,6 +137,65 @@ impl TraceStore {
         )?;
         let limit = limit.map_or(-1, i64::from);
         let rows = stmt.query_map(params![session, to_i64(after_seq), limit], stored_message)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The newest `limit` messages below `before_seq`, oldest first
+    /// (the chat view pages backwards from the end).
+    pub fn session_messages_before(
+        &self,
+        session: &SessionId,
+        before_seq: u64,
+        limit: u32,
+    ) -> Result<Vec<StoredMessage>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare_cached(
+            "SELECT seq, role, content_json, agent_id, step_id, created_at FROM session_messages
+             WHERE session_id = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![session, to_i64(before_seq), limit], stored_message)?;
+        let mut rows: Vec<StoredMessage> = rows.collect::<rusqlite::Result<_>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// Every agent of the session, oldest first, with the totals of its
+    /// mentor calls.
+    pub fn session_agents(&self, session: &SessionId) -> Result<Vec<AgentSummary>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare_cached(
+            "SELECT a.id, a.status, a.created_at, a.ended_at,
+                    (SELECT model FROM mentor_calls c
+                      WHERE c.agent_id = a.id AND c.kind = 'step' ORDER BY started_at LIMIT 1),
+                    (SELECT COUNT(*) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COALESCE(SUM(input_tokens), 0) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COALESCE(SUM(output_tokens), 0) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COALESCE(SUM(cache_read_tokens), 0) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COALESCE(SUM(cache_creation_tokens), 0) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COALESCE(SUM(cost_micros), 0) FROM mentor_calls c WHERE c.agent_id = a.id),
+                    (SELECT COUNT(*) FROM mentor_calls c
+                      WHERE c.agent_id = a.id AND c.status = 'ok' AND c.cost_micros IS NULL)
+             FROM agents a WHERE a.session_id = ?1 ORDER BY a.created_at, a.id",
+        )?;
+        let rows = stmt.query_map(params![session], |r| {
+            let cost_micros: i64 = r.get(10)?;
+            let unpriced: i64 = r.get(11)?;
+            Ok(AgentSummary {
+                id: r.get(0)?,
+                status: r.get(1)?,
+                started_at: r.get(2)?,
+                ended_at: r.get(3)?,
+                model: r.get(4)?,
+                calls: get_u64(r, 5)?,
+                usage: Usage {
+                    input_tokens: get_u64(r, 6)?,
+                    output_tokens: get_u64(r, 7)?,
+                    cache_read_input_tokens: get_u64(r, 8)?,
+                    cache_creation_input_tokens: get_u64(r, 9)?,
+                },
+                cost_usd: (unpriced == 0).then(|| micros_to_usd(cost_micros)),
+            })
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 

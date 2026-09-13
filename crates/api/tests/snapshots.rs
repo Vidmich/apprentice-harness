@@ -16,11 +16,11 @@ use apprentice_api::methods::{
     WorkspaceIdParams, WorkspaceInfoResult, WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
-    ApprenticeStats, ConfigLayer, Effort, MentorCallInfo, PermissionAnswer, PermissionDecision,
-    PermissionMode, PermissionSource, RuleDefault, RuleEffect, RuleFileInfo, RuleInfo, RuleMatch,
-    RuleSource, RuleSpec, RunOptions, SESSION_EXPORT_FORMAT, SessionExport, SessionInfo,
-    SessionMessage, SessionSearchHit, SessionSummary, StatsRange, TokenBucket, TokenStats,
-    ToolInfo, Usage, WorkspaceSummary,
+    AgentSummary, ApprenticeStats, ConfigLayer, Effort, MentorCallInfo, PermissionAnswer,
+    PermissionDecision, PermissionMode, PermissionSource, RuleDefault, RuleEffect, RuleFileInfo,
+    RuleInfo, RuleMatch, RuleSource, RuleSpec, RunOptions, SESSION_EXPORT_FORMAT, SessionExport,
+    SessionInfo, SessionMessage, SessionSearchHit, SessionSummary, StatsRange, TokenBucket,
+    TokenStats, ToolInfo, Usage, WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -302,12 +302,23 @@ fn session_shapes() {
             SessionGetParams {
                 id: "s1".into(),
                 after_seq: None,
+                before_seq: Some(3),
                 limit: Some(2),
             },
             SessionGetResult {
                 session: info.clone(),
                 messages: messages.clone(),
                 has_more: true,
+                agents: vec![AgentSummary {
+                    id: "a1".into(),
+                    status: "ok".into(),
+                    started_at: "2026-09-12T10:00:01.000Z".into(),
+                    ended_at: Some("2026-09-12T10:00:09.000Z".into()),
+                    model: Some("claude-opus-5".into()),
+                    calls: 2,
+                    usage,
+                    cost_usd: Some(0.0138),
+                }],
             }
         )
     );
@@ -574,6 +585,7 @@ fn event_shapes() {
             summary: "read 12 lines".into(),
             blob_id: Some("abc".into()),
             mentor_bytes: 412,
+            event_id: Some("ev12".into()),
         },
         Event::AgentUsage {
             agent_id: "a1".into(),

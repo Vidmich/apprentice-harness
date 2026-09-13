@@ -127,6 +127,10 @@ pub enum Event {
         /// Length of the result text the mentor receives.
         #[serde(default)]
         mentor_bytes: u64,
+        /// The `tool.result` trace event (its blob is the raw output);
+        /// absent when the trace write failed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        event_id: Option<String>,
     },
     #[serde(rename = "agent.usage")]
     AgentUsage {

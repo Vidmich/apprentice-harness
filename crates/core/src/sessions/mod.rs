@@ -108,20 +108,32 @@ pub async fn get(
     let store = Arc::clone(state.store());
     let limit = p.limit.unwrap_or(DEFAULT_PAGE).max(1);
     let after = p.after_seq.unwrap_or(0);
+    let before = p.before_seq;
     blocking(move || {
         let session = store.session_info(&id)?;
-        // One past the page tells whether more follow.
-        let mut rows = store.session_messages(&id, after, Some(limit + 1))?;
+        // One past the page tells whether more follow (or precede).
+        let mut rows = match before {
+            Some(before) => store.session_messages_before(&id, before, limit + 1)?,
+            None => store.session_messages(&id, after, Some(limit + 1))?,
+        };
         let has_more = rows.len() > limit as usize;
-        rows.truncate(limit as usize);
+        if has_more {
+            if before.is_some() {
+                rows.remove(0);
+            } else {
+                rows.truncate(limit as usize);
+            }
+        }
         let messages = rows
             .into_iter()
             .map(StoredMessage::into_wire)
             .collect::<Result<Vec<_>, _>>()?;
+        let agents = store.session_agents(&id)?;
         Ok(SessionGetResult {
             session,
             messages,
             has_more,
+            agents,
         })
     })
     .await

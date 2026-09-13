@@ -1,10 +1,11 @@
 ---
 source: crates/api/tests/snapshots.rs
-expression: "(SessionGetParams { id: \"s1\".into(), after_seq: None, limit: Some(2), },\nSessionGetResult\n{ session: info.clone(), messages: messages.clone(), has_more: true, })"
+expression: "(SessionGetParams\n{ id: \"s1\".into(), after_seq: None, before_seq: Some(3), limit: Some(2), },\nSessionGetResult\n{\n    session: info.clone(), messages: messages.clone(), has_more: true, agents:\n    vec![AgentSummary\n    {\n        id: \"a1\".into(), status: \"ok\".into(), started_at:\n        \"2026-09-12T10:00:01.000Z\".into(), ended_at:\n        Some(\"2026-09-12T10:00:09.000Z\".into()), model:\n        Some(\"claude-opus-5\".into()), calls: 2, usage, cost_usd: Some(0.0138),\n    }],\n})"
 ---
 [
   {
     "id": "s1",
+    "before_seq": 3,
     "limit": 2
   },
   {
@@ -75,6 +76,23 @@ expression: "(SessionGetParams { id: \"s1\".into(), after_seq: None, limit: Some
         "created_at": "2026-09-12T10:00:03.000Z"
       }
     ],
-    "has_more": true
+    "has_more": true,
+    "agents": [
+      {
+        "id": "a1",
+        "status": "ok",
+        "started_at": "2026-09-12T10:00:01.000Z",
+        "ended_at": "2026-09-12T10:00:09.000Z",
+        "model": "claude-opus-5",
+        "calls": 2,
+        "usage": {
+          "input_tokens": 1204,
+          "output_tokens": 310,
+          "cache_read_input_tokens": 900,
+          "cache_creation_input_tokens": 0
+        },
+        "cost_usd": 0.0138
+      }
+    ]
   }
 ]

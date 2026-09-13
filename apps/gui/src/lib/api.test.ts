@@ -121,6 +121,18 @@ describe("api.ts against the Rust snapshots", () => {
     expect(result.tokens).toBe(1042);
   });
 
+  it("reads the agents of a session and the trace event of a tool result", () => {
+    const [params, result] = snapshot("session_get") as [SessionGetParams, SessionGetResult];
+    expect(params.before_seq).toBe(3);
+    expect(result.agents?.map((a) => [a.id, a.status, a.model, a.calls])).toEqual([
+      ["a1", "ok", "claude-opus-5", 2],
+    ]);
+    const notifications = snapshot("events") as EventNotification[];
+    const result_ev = notifications.map((n) => n.event).find((e) => e.type === "agent.tool_result");
+    expect(result_ev).toBeDefined();
+    if (result_ev?.type === "agent.tool_result") expect(result_ev.event_id).toBe("ev12");
+  });
+
   it("reads sessions, their messages, search hits and an export", () => {
     const [listParams, list] = snapshot("session_list") as [SessionListParams, SessionListResult];
     expect(listParams.query).toBe("hello");

@@ -21,6 +21,12 @@ export async function refreshDaemonFacts(): Promise<void> {
     console.warn("config.get failed:", e instanceof RpcFailure ? e.message : e);
     store.setModel(undefined);
   }
+  try {
+    const got = await call("config.get", { key: "mentor.thinking_display" });
+    store.setThinkingDisplay(got.value === "omitted" ? "omitted" : "summarized");
+  } catch (e) {
+    console.warn("config.get failed:", e instanceof RpcFailure ? e.message : e);
+  }
 }
 
 /** Called once from `main.tsx`. Returns a function that stops listening. */

@@ -1,4 +1,4 @@
-import Playground from "./components/Playground";
+import Chat from "./components/Chat";
 import Setup from "./components/Setup";
 import Sidebar from "./components/Sidebar";
 import StatusBar from "./components/StatusBar";
@@ -7,10 +7,10 @@ import { authConfigured, useStore } from "./store";
 export default function App() {
   const daemon = useStore((s) => s.daemon);
   const auth = useStore((s) => s.auth);
-  const tabs = useStore((s) => s.tabs);
-  const activeTab = useStore((s) => s.activeTab);
+  const chats = useStore((s) => s.chats);
+  const activeChat = useStore((s) => s.activeChat);
   const configured = authConfigured(auth);
-  const tab = tabs.find((t) => t.id === activeTab) ?? tabs[0];
+  const chat = chats.find((c) => c.id === activeChat) ?? chats[0];
 
   let main: React.ReactNode;
   if (!daemon.connected) {
@@ -22,8 +22,8 @@ export default function App() {
     );
   } else if (configured === false) {
     main = <Setup />;
-  } else if (tab !== undefined) {
-    main = <Playground key={tab.id} tab={tab} />;
+  } else if (chat !== undefined) {
+    main = <Chat key={chat.id} chat={chat} />;
   }
 
   return (

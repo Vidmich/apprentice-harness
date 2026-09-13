@@ -834,6 +834,7 @@ impl<'a> Run<'a> {
                     summary: done.summary.clone(),
                     blob_id: done.blob_id.as_ref().map(ToString::to_string),
                     mentor_bytes: done.mentor_bytes as u64,
+                    event_id: done.result_event.as_ref().map(ToString::to_string),
                 });
             })
         };

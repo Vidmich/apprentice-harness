@@ -3,7 +3,6 @@
 // commands are untyped passthroughs (`rpc_call`, `rpc_stream`); the types
 // live in `api.ts`.
 
-import { invoke } from "@tauri-apps/api/core";
 import {
   type MethodName,
   type Methods,
@@ -11,6 +10,7 @@ import {
   type StreamingMethod,
   isRpcError,
 } from "./api";
+import { invoke } from "./bridge";
 
 export { API_VERSION } from "./api";
 

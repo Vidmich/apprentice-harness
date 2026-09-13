@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::types::{
-    ConfigLayer, ConfigSource, EventSummary, PermissionAnswer, RuleFileInfo, RuleInfo, RuleMatch,
-    RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
-    SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
+    AgentSummary, ConfigLayer, ConfigSource, EventSummary, PermissionAnswer, RuleFileInfo,
+    RuleInfo, RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage,
+    SessionSearchHit, SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -235,6 +235,10 @@ pub struct SessionGetParams {
     /// Messages with `seq` above this (paging forwards).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_seq: Option<u64>,
+    /// Messages with `seq` below this (paging backwards: the newest
+    /// page first, then older ones). Wins over `after_seq`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 }
@@ -242,10 +246,15 @@ pub struct SessionGetParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionGetResult {
     pub session: SessionInfo,
+    /// The page, oldest first whichever way it was paged.
     pub messages: Vec<SessionMessage>,
-    /// More messages follow the page.
+    /// More messages follow the page (`after_seq`) or precede it
+    /// (`before_seq`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_more: bool,
+    /// Every agent of the session, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentSummary>,
 }
 
 method!(

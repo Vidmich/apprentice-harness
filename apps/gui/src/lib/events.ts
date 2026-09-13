@@ -3,8 +3,8 @@
 // side picks, so it can listen before the first event exists) and
 // `daemon:status` for the connection state.
 
-import { listen } from "@tauri-apps/api/event";
 import { type EventNotification, isEventNotification } from "./api";
+import { listen } from "./bridge";
 import type { DaemonStatus } from "./rpc";
 
 export type Unsubscribe = () => void;
@@ -27,16 +27,14 @@ export async function subscribe(
   channel: string,
   handler: (ev: EventNotification) => void,
 ): Promise<Unsubscribe> {
-  const unlisten = await listen<unknown>(eventName(channel), (e) => {
-    if (isEventNotification(e.payload)) handler(e.payload);
+  return listen<unknown>(eventName(channel), (payload) => {
+    if (isEventNotification(payload)) handler(payload);
   });
-  return unlisten;
 }
 
 /** Connection-state changes from the backend's connection manager. */
 export async function onDaemonStatus(
   handler: (status: DaemonStatus) => void,
 ): Promise<Unsubscribe> {
-  const unlisten = await listen<DaemonStatus>(STATUS_EVENT, (e) => handler(e.payload));
-  return unlisten;
+  return listen<DaemonStatus>(STATUS_EVENT, handler);
 }

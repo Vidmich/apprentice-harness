@@ -366,6 +366,7 @@ async fn every_message_is_stored_as_sent_and_the_session_resumes_after_a_restart
         &SessionGetParams {
             id: session.to_string(),
             after_seq: Some(4),
+            before_seq: None,
             limit: Some(1),
         },
     )
@@ -375,6 +376,53 @@ async fn every_message_is_stored_as_sent_and_the_session_resumes_after_a_restart
     assert_eq!(got.messages.len(), 1);
     assert_eq!(got.messages[0].seq, 5);
     assert!(got.has_more);
+    // The chat view pages backwards: the newest page first (oldest
+    // first within it), `has_more` meaning older rows precede it; the
+    // agents come with every page.
+    let got = sessions::get(
+        &h.state,
+        &SessionGetParams {
+            id: session.to_string(),
+            after_seq: None,
+            before_seq: Some(u64::MAX),
+            limit: Some(2),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        got.messages.iter().map(|m| m.seq).collect::<Vec<_>>(),
+        [5, 6]
+    );
+    assert!(got.has_more);
+    let older = sessions::get(
+        &h.state,
+        &SessionGetParams {
+            id: session.to_string(),
+            after_seq: None,
+            before_seq: Some(5),
+            limit: Some(10),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        older.messages.iter().map(|m| m.seq).collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
+    assert!(!older.has_more);
+    assert_eq!(got.agents.len(), 1);
+    let a = &got.agents[0];
+    assert_eq!(a.status, "ok");
+    assert_eq!(a.calls, 3);
+    assert_eq!(a.model.as_deref(), Some("claude-opus-5"));
+    assert_eq!(a.usage, s.usage);
+    assert_eq!(a.cost_usd, s.cost_usd);
+    assert!(a.ended_at.is_some());
+    assert_eq!(
+        rows[0].agent_id.as_ref().map(ToString::to_string),
+        Some(a.id.clone())
+    );
 
     // A restart: the next run loads the six rows and sends them all,
     // with the new prompt appended, and no repair or prefix change.
