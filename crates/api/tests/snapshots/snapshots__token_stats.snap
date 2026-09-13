@@ -1,6 +1,6 @@
 ---
 source: crates/api/tests/snapshots.rs
-expression: "TokenStats\n{\n    range: StatsRange\n    { since: Some(\"2026-09-01T00:00:00Z\".into()), until: None }, tz:\n    \"Europe/Amsterdam\".into(), totals: bucket(None), by_model:\n    vec![bucket(Some(\"claude-opus-5\"))], by_day:\n    vec![bucket(Some(\"2026-09-11\"))], by_session: vec![], apprentice:\n    ApprenticeStats::default(),\n}"
+expression: "TokenStats\n{\n    range: StatsRange\n    { since: Some(\"2026-09-01T00:00:00Z\".into()), until: None }, tz:\n    \"Europe/Amsterdam\".into(), totals: bucket(None), by_model:\n    vec![bucket(Some(\"claude-opus-5\"))], by_day:\n    vec![bucket(Some(\"2026-09-11\"))], by_session: vec![], by_workspace:\n    vec![], by_kind: vec![bucket(Some(\"step\"))], apprentice:\n    ApprenticeStats::default(),\n}"
 ---
 {
   "range": {
@@ -42,6 +42,19 @@ expression: "TokenStats\n{\n    range: StatsRange\n    { since: Some(\"2026-09-0
     }
   ],
   "by_session": [],
+  "by_workspace": [],
+  "by_kind": [
+    {
+      "key": "step",
+      "calls": 14,
+      "input": 182340,
+      "output": 21004,
+      "cache_read": 610222,
+      "cache_creation": 12000,
+      "cost_usd": 1.84,
+      "unpriced_calls": 0
+    }
+  ],
   "apprentice": {
     "invocations": 0,
     "bypassed": 0,

@@ -736,7 +736,8 @@ const SUMMARY_COLUMNS: &str = "
            (SELECT COALESCE(SUM(cost_micros), 0) FROM mentor_calls c WHERE c.session_id = s.id),
            (SELECT COUNT(*) FROM mentor_calls c
              WHERE c.session_id = s.id AND c.status = 'ok' AND c.cost_micros IS NULL),
-           s.title_source, s.prompt_version, s.tools_hash, s.config_json
+           s.title_source, s.prompt_version, s.tools_hash, s.config_json,
+           (SELECT COUNT(*) FROM mentor_calls c WHERE c.session_id = s.id)
     FROM sessions s";
 
 fn session_info(r: &Row<'_>) -> rusqlite::Result<SessionInfo> {
@@ -780,6 +781,7 @@ fn session_info(r: &Row<'_>) -> rusqlite::Result<SessionInfo> {
                 cache_creation_input_tokens: get_u64(r, 13)?,
             },
             cost_usd: (unpriced == 0).then(|| micros_to_usd(cost_micros)),
+            calls: get_u64(r, 20)?,
         },
         title_source,
         prompt_version: r.get(17)?,

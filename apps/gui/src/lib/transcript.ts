@@ -416,6 +416,7 @@ export function applyEvent(t: Transcript, ev: EventNotification, now: number): T
         const info: SessionInfo = { ...next.info, usage: e.session_usage };
         if (e.session_cost_usd !== undefined) info.cost_usd = e.session_cost_usd;
         else delete info.cost_usd;
+        info.calls = e.session_calls ?? next.info.calls + 1;
         next = { ...next, info };
       }
       return { ...next, agents };

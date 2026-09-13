@@ -461,6 +461,7 @@ mod tests {
                 "session.list",
                 "session.rename",
                 "session.search",
+                "stats.calls",
                 "stats.reprice",
                 "stats.tokens",
                 "tools.allow",

@@ -361,6 +361,7 @@ async fn every_message_is_stored_as_sent_and_the_session_resumes_after_a_restart
     assert_eq!(s.running_agent, None, "the run has ended");
     assert_eq!(s.usage.input_tokens, 412 + 650 + 25);
     assert!(s.cost_usd.unwrap() > 0.0);
+    assert_eq!(s.calls, 3);
     assert!(s.last_activity >= s.created_at);
     let got = sessions::get(
         &h.state,
@@ -467,6 +468,7 @@ async fn every_message_is_stored_as_sent_and_the_session_resumes_after_a_restart
     let conv = conv.lock().await;
     assert_eq!(conv.totals().input_tokens, 412 + 650 + 25 + 25);
     assert!(conv.cost_micros().unwrap() > 0);
+    assert_eq!(conv.calls(), 4, "seeded with the first run's three");
     h.state.close().await;
 }
 

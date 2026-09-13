@@ -148,6 +148,9 @@ pub enum Event {
         /// was unpriced.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd: Option<f64>,
+        /// Mentor calls of the session so far, this one included.
+        #[serde(default)]
+        session_calls: u64,
     },
     /// Something the user should know that does not end the run:
     /// `context_large` (the last call's input passed

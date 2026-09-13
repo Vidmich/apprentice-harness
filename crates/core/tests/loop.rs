@@ -329,18 +329,23 @@ async fn a_three_step_trajectory_streams_events_and_records_every_step() {
             "agent.finished",
         ]
     );
-    let usage: Vec<(u64, u64)> = events
+    let usage: Vec<(u64, u64, u64)> = events
         .iter()
         .filter_map(|e| match e {
             Event::AgentUsage {
                 usage,
                 session_usage,
+                session_calls,
                 ..
-            } => Some((usage.input_tokens, session_usage.input_tokens)),
+            } => Some((
+                usage.input_tokens,
+                session_usage.input_tokens,
+                *session_calls,
+            )),
             _ => None,
         })
         .collect();
-    assert_eq!(usage, [(412, 412), (650, 1062), (25, 1087)]);
+    assert_eq!(usage, [(412, 412, 1), (650, 1062, 2), (25, 1087, 3)]);
     assert!(
         h.workspace.path().join("src/hello.rs").is_file(),
         "the write ran"

@@ -491,6 +491,7 @@ fn seed_totals(state: &AppState, conv: &mut Conversation) {
                 cache_creation_input_tokens: t.cache_creation_tokens,
             },
             (t.unpriced_calls == 0).then_some(t.cost_micros),
+            t.calls,
         ),
         Ok(_) => {}
         Err(e) => tracing::debug!(error = %e, "cannot seed session totals"),

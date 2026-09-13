@@ -55,6 +55,19 @@ body,
   }
 }
 
+/* The turn the usage panel jumped to, for a moment. */
+.jump-flash {
+  animation: jump-flash 2s ease-out;
+}
+@keyframes jump-flash {
+  from {
+    background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
 /* Markdown in the transcript. */
 .prose-chat > :first-child {
   margin-top: 0;

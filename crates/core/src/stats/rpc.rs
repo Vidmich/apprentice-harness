@@ -1,20 +1,26 @@
-//! `stats.tokens` and `stats.reprice` over the trace store and the pricing
-//! table. The daemon registers them on its router (task M00-08).
+//! `stats.tokens`, `stats.calls` and `stats.reprice` over the trace store
+//! and the pricing table. The daemon registers them on its router (task
+//! M00-08; the calls list and the breakdown choice are task M01-13).
 
 use std::sync::Arc;
 
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
-    StatsReprice, StatsRepriceParams, StatsRepriceResult, StatsTokens, StatsTokensParams,
+    StatsCalls, StatsCallsParams, StatsCallsResult, StatsReprice, StatsRepriceParams,
+    StatsRepriceResult, StatsTokens, StatsTokensParams,
 };
 use apprentice_api::server::{Connection, Router};
-use apprentice_api::types::{ApprenticeStats, StatsRange, TokenBucket, TokenStats};
+use apprentice_api::types::{
+    ApprenticeStats, CallSummary, StatsGroup, StatsRange, TokenBucket, TokenStats,
+};
 use time::{OffsetDateTime, UtcOffset};
 
 use super::cost::{PriceTable, micros_to_usd, price_call};
 use super::range::{BoundKind, format_offset, parse_bound};
 use crate::config::ConfigLoader;
-use crate::trace::{CallFilter, GroupBy, GroupedTotals, TraceError, TraceStore, UsageTotals};
+use crate::trace::{
+    CallFilter, CallListRow, GroupBy, GroupedTotals, TraceError, TraceStore, UsageTotals,
+};
 
 /// Where the price table comes from.
 #[derive(Debug, Clone)]
@@ -26,7 +32,7 @@ pub enum PricingSource {
     Fixed(PriceTable),
 }
 
-/// Handlers for `stats.tokens` and `stats.reprice`.
+/// Handlers for `stats.tokens`, `stats.calls` and `stats.reprice`.
 #[derive(Debug, Clone)]
 pub struct StatsService {
     store: Arc<TraceStore>,
@@ -88,6 +94,7 @@ impl StatsService {
         since: Option<&str>,
         until: Option<&str>,
         session_id: Option<&str>,
+        workspace_id: Option<&str>,
         model: Option<&str>,
         offset: UtcOffset,
     ) -> Result<CallFilter, RpcError> {
@@ -104,11 +111,13 @@ impl StatsService {
             status: None,
             since: bound(since, BoundKind::Since)?,
             until: bound(until, BoundKind::Until)?,
+            workspace_id: workspace_id.map(str::to_owned),
         })
     }
 
-    /// Aggregates over calls matching the params. `by_session` is only
-    /// filled when the query is not already limited to one session.
+    /// Aggregates over calls matching the params, with the breakdowns of
+    /// `group_by` ([`StatsGroup::DEFAULT`] when empty). `by_session` is
+    /// only filled when the query is not already limited to one session.
     ///
     /// # Errors
     /// `invalid_params` for an unparsable bound, else a store error.
@@ -118,10 +127,41 @@ impl StatsService {
             p.since.as_deref(),
             p.until.as_deref(),
             p.session_id.as_deref(),
+            p.workspace_id.as_deref(),
             None,
             offset,
         )?;
-        Ok(token_stats(&self.store, &filter, offset)?)
+        let groups = if p.group_by.is_empty() {
+            StatsGroup::DEFAULT
+        } else {
+            &p.group_by
+        };
+        Ok(token_stats(&self.store, &filter, offset, groups)?)
+    }
+
+    /// The calls matching the params, newest first, one page.
+    ///
+    /// # Errors
+    /// `invalid_params` for an unparsable bound, else a store error.
+    pub fn calls(&self, p: &StatsCallsParams) -> Result<StatsCallsResult, RpcError> {
+        let offset = self.offset()?;
+        let filter = Self::filter(
+            p.since.as_deref(),
+            p.until.as_deref(),
+            p.session_id.as_deref(),
+            p.workspace_id.as_deref(),
+            None,
+            offset,
+        )?;
+        let limit = p
+            .limit
+            .unwrap_or(StatsCallsParams::DEFAULT_LIMIT)
+            .clamp(1, StatsCallsParams::MAX_LIMIT);
+        let (rows, total) = self.store.list_calls_page(&filter, limit, p.offset)?;
+        Ok(StatsCallsResult {
+            calls: rows.iter().map(call_summary).collect(),
+            total,
+        })
     }
 
     /// Recomputes stored costs from the current price table.
@@ -135,6 +175,7 @@ impl StatsService {
             p.since.as_deref(),
             p.until.as_deref(),
             p.session_id.as_deref(),
+            None,
             p.model.as_deref(),
             offset,
         )?;
@@ -148,12 +189,17 @@ impl StatsService {
         })
     }
 
-    /// Registers both methods; each runs on the blocking pool.
+    /// Registers the three methods; each runs on the blocking pool.
     pub fn register(self: Arc<Self>, router: &mut Router) {
         let svc = Arc::clone(&self);
         router.add::<StatsTokens, _, _>(move |_c: Arc<Connection>, p: StatsTokensParams| {
             let svc = Arc::clone(&svc);
             blocking(move || svc.tokens(&p))
+        });
+        let svc = Arc::clone(&self);
+        router.add::<StatsCalls, _, _>(move |_c: Arc<Connection>, p: StatsCallsParams| {
+            let svc = Arc::clone(&svc);
+            blocking(move || svc.calls(&p))
         });
         let svc = Arc::clone(&self);
         router.add::<StatsReprice, _, _>(move |_c: Arc<Connection>, p: StatsRepriceParams| {
@@ -163,8 +209,8 @@ impl StatsService {
     }
 }
 
-/// Builds the wire result: totals plus per-model, per-day (in `offset`) and
-/// per-session groups. The range echoes the resolved bounds.
+/// Builds the wire result: totals plus the breakdowns in `groups` (days
+/// in `offset`). The range echoes the resolved bounds.
 ///
 /// # Errors
 /// Store errors.
@@ -172,19 +218,19 @@ pub fn token_stats(
     store: &TraceStore,
     filter: &CallFilter,
     offset: UtcOffset,
+    groups: &[StatsGroup],
 ) -> Result<TokenStats, TraceError> {
     let totals = store.stats(filter)?;
-    let by_model = store.stats_by(filter, GroupBy::Model)?;
-    let by_day = store.stats_by(
-        filter,
-        GroupBy::Day {
-            offset_secs: offset.whole_seconds(),
-        },
-    )?;
+    let by = |group: StatsGroup, sql: GroupBy| -> Result<Vec<TokenBucket>, TraceError> {
+        if !groups.contains(&group) {
+            return Ok(Vec::new());
+        }
+        Ok(store.stats_by(filter, sql)?.iter().map(grouped).collect())
+    };
     let by_session = if filter.session_id.is_some() {
         Vec::new()
     } else {
-        store.stats_by(filter, GroupBy::Session)?
+        by(StatsGroup::Session, GroupBy::Session)?
     };
     Ok(TokenStats {
         range: StatsRange {
@@ -193,11 +239,43 @@ pub fn token_stats(
         },
         tz: format_offset(offset),
         totals: bucket(None, None, &totals),
-        by_model: by_model.iter().map(grouped).collect(),
-        by_day: by_day.iter().map(grouped).collect(),
-        by_session: by_session.iter().map(grouped).collect(),
+        by_model: by(StatsGroup::Model, GroupBy::Model)?,
+        by_day: by(
+            StatsGroup::Day,
+            GroupBy::Day {
+                offset_secs: offset.whole_seconds(),
+            },
+        )?,
+        by_session,
+        by_workspace: by(StatsGroup::Workspace, GroupBy::Workspace)?,
+        by_kind: by(StatsGroup::Kind, GroupBy::Kind)?,
         apprentice: ApprenticeStats::default(),
     })
+}
+
+fn call_summary(row: &CallListRow) -> CallSummary {
+    let c = &row.call;
+    let usage = c.usage.unwrap_or_default();
+    CallSummary {
+        call_id: c.id.to_string(),
+        started_at: c.started_at.clone(),
+        session_id: c.session_id.to_string(),
+        session_title: row.session_title.clone(),
+        workspace_id: row.workspace_id.clone(),
+        agent_id: c.agent_id.to_string(),
+        kind: c.kind.as_str().to_owned(),
+        model: c.model.clone(),
+        effort: c.effort.clone(),
+        status: c.status.as_str().to_owned(),
+        stop_reason: c.stop_reason.clone(),
+        input: usage.input_tokens,
+        output: usage.output_tokens,
+        cache_read: usage.cache_read_input_tokens,
+        cache_creation: usage.cache_creation_input_tokens,
+        cost_usd: c.cost_micros.map(micros_to_usd),
+        total_ms: c.total_ms,
+        request_event_id: c.request_event_id.to_string(),
+    }
 }
 
 fn grouped(g: &GroupedTotals) -> TokenBucket {

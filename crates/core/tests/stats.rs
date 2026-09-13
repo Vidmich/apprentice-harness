@@ -1,12 +1,15 @@
-//! Token accounting over recorded mentor calls: aggregation by model, day
-//! and session, range bounds, the `stats.*` RPC methods and repricing.
+//! Token accounting over recorded mentor calls: aggregation by model, day,
+//! session, workspace and kind, range bounds, the calls list, the
+//! `stats.*` RPC methods and repricing.
 
 use std::sync::Arc;
 
 use apprentice_api::jsonrpc::codes;
-use apprentice_api::methods::{StatsReprice, StatsRepriceParams, StatsTokens, StatsTokensParams};
+use apprentice_api::methods::{
+    StatsCalls, StatsCallsParams, StatsReprice, StatsRepriceParams, StatsTokens, StatsTokensParams,
+};
 use apprentice_api::server::{Router, RouterConfig};
-use apprentice_api::types::{TokenBucket, TokenStats, Usage};
+use apprentice_api::types::{StatsGroup, TokenBucket, TokenStats, Usage};
 use apprentice_client::{ClientError, ClientOptions, DaemonClient};
 use apprentice_common::paths::Paths;
 use apprentice_core::config::Pricing;
@@ -59,10 +62,22 @@ fn session(store: &TraceStore, title: &str) -> SessionId {
         .unwrap()
 }
 
-/// Records one completed call priced with `table`.
+/// Records one completed step call priced with `table`.
 fn call(
     store: &TraceStore,
     sid: &SessionId,
+    model: &str,
+    started_at: &str,
+    usage: Usage,
+    table: &PriceTable,
+) -> CallId {
+    call_of(store, sid, CallKind::Step, model, started_at, usage, table)
+}
+
+fn call_of(
+    store: &TraceStore,
+    sid: &SessionId,
+    kind: CallKind,
     model: &str,
     started_at: &str,
     usage: Usage,
@@ -92,13 +107,15 @@ fn call(
             effort: None,
             request_bytes: Some(2),
             started_at: Some(started_at.into()),
-            kind: CallKind::Step,
+            kind,
         })
         .unwrap();
     store
         .complete_mentor_call(&MentorCallEnd {
             usage: Some(usage),
             cost_micros: price_call(model, &usage, table),
+            total_ms: Some(1500),
+            stop_reason: Some("end_turn".into()),
             ..MentorCallEnd::new(id.clone(), RunStatus::Ok)
         })
         .unwrap();
@@ -115,10 +132,24 @@ fn call(
 /// | c3   | beta    | opus    | 09-11 12:00      | 100/10/0/0           | 750    |
 /// | c4   | beta    | unknown | 09-11 13:00      | 10/10/0/0            | NULL   |
 fn fixture() -> Fixture {
+    fixture_in(None).0
+}
+
+/// The fixture with `alpha` on a registered workspace at `root`; returns
+/// the workspace id.
+fn fixture_in(root: Option<&str>) -> (Fixture, Option<String>) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(TraceStore::open(&Paths::from_home(dir.path())).unwrap());
     let t = table();
-    let s1 = session(&store, "alpha");
+    let ws = root.map(|r| store.add_workspace(r, Some("alpha")).unwrap().id);
+    let s1 = store
+        .create_session(&NewSession {
+            title: Some("alpha".into()),
+            workspace_path: root.map(str::to_owned),
+            workspace_id: ws.clone(),
+            config: json!({}),
+        })
+        .unwrap();
     let s2 = session(&store, "beta");
     let calls = vec![
         call(
@@ -154,13 +185,16 @@ fn fixture() -> Fixture {
             &t,
         ),
     ];
-    Fixture {
-        _dir: dir,
-        store,
-        s1,
-        s2,
-        calls,
-    }
+    (
+        Fixture {
+            _dir: dir,
+            store,
+            s1,
+            s2,
+            calls,
+        },
+        ws.map(|w| w.to_string()),
+    )
 }
 
 fn service(f: &Fixture, offset: UtcOffset) -> StatsService {
@@ -254,7 +288,7 @@ fn range_bounds_accept_dates_timestamps_and_ages() {
         svc.tokens(&StatsTokensParams {
             since: since.map(str::to_owned),
             until: until.map(str::to_owned),
-            session_id: None,
+            ..Default::default()
         })
     };
 
@@ -279,6 +313,162 @@ fn range_bounds_accept_dates_timestamps_and_ages() {
     let err = tokens(Some("yesterday"), None).unwrap_err();
     assert_eq!(err.code, codes::INVALID_PARAMS);
     assert!(err.message.contains("yesterday"), "{err:?}");
+}
+
+/// The fixture plus a workspace under `alpha` and a title call on it
+/// (task M01-13).
+///
+/// | call | session | kind  | model  | started (UTC) | usage       | micros |
+/// |------|---------|-------|--------|---------------|-------------|--------|
+/// | c5   | alpha   | title | sonnet | 09-11 08:01   | 80/6/0/0    | 220    |
+fn fixture_with_workspace() -> (Fixture, String, CallId) {
+    let (f, ws) = fixture_in(Some("C:/src/alpha"));
+    let ws = ws.unwrap();
+    let title = call_of(
+        &f.store,
+        &f.s1,
+        CallKind::Title,
+        SONNET,
+        "2026-09-11T08:01:00.000Z",
+        usage(80, 6, 0, 0),
+        &table(),
+    );
+    (f, ws, title)
+}
+
+#[test]
+fn group_by_picks_the_breakdowns_and_adds_workspace_and_kind() {
+    let (f, ws, _) = fixture_with_workspace();
+    let svc = service(&f, UtcOffset::UTC);
+
+    // Without `group_by`: the M00-07 tables and nothing else.
+    let s = svc.tokens(&StatsTokensParams::default()).unwrap();
+    assert!(!s.by_model.is_empty() && !s.by_day.is_empty() && !s.by_session.is_empty());
+    assert!(s.by_workspace.is_empty() && s.by_kind.is_empty());
+    assert_bucket(&s.totals, 5, 3190, 326, 0.01482, 1);
+
+    let s = svc
+        .tokens(&StatsTokensParams {
+            group_by: vec![StatsGroup::Workspace, StatsGroup::Kind],
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(s.by_model.is_empty() && s.by_day.is_empty() && s.by_session.is_empty());
+
+    // Workspaces: alpha's (dearer) first, then the sessions without one.
+    assert_eq!(s.by_workspace.len(), 2);
+    assert_eq!(s.by_workspace[0].key.as_deref(), Some(ws.as_str()));
+    assert_eq!(s.by_workspace[0].label.as_deref(), Some("C:/src/alpha"));
+    assert_bucket(&s.by_workspace[0], 3, 3080, 306, 0.01407, 0);
+    assert_eq!(s.by_workspace[1].key.as_deref(), Some(""));
+    assert_eq!(s.by_workspace[1].label, None);
+    assert_bucket(&s.by_workspace[1], 2, 110, 20, 0.00075, 1);
+
+    // Kinds: the title call is counted and told apart.
+    let kinds: Vec<_> = s.by_kind.iter().map(|b| b.key.as_deref()).collect();
+    assert_eq!(kinds, vec![Some("step"), Some("title")]);
+    assert_bucket(&s.by_kind[0], 4, 3110, 320, 0.0146, 1);
+    assert_bucket(&s.by_kind[1], 1, 80, 6, 0.00022, 0);
+
+    // A workspace filter keeps only its sessions' calls.
+    let s = svc
+        .tokens(&StatsTokensParams {
+            workspace_id: Some(ws.clone()),
+            group_by: vec![StatsGroup::Session],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_bucket(&s.totals, 3, 3080, 306, 0.01407, 0);
+    assert_eq!(s.by_session.len(), 1);
+    assert_eq!(s.by_session[0].label.as_deref(), Some("alpha"));
+    let s = svc
+        .tokens(&StatsTokensParams {
+            workspace_id: Some("nope".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(s.totals.calls, 0);
+}
+
+#[test]
+fn calls_list_newest_first_with_the_session_and_pages() {
+    let (f, ws, title) = fixture_with_workspace();
+    let svc = service(&f, UtcOffset::UTC);
+
+    let r = svc.calls(&StatsCallsParams::default()).unwrap();
+    assert_eq!(r.total, 5);
+    let ids: Vec<_> = r.calls.iter().map(|c| c.call_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            f.calls[3].as_str(),
+            f.calls[2].as_str(),
+            title.as_str(),
+            f.calls[1].as_str(),
+            f.calls[0].as_str(),
+        ]
+    );
+    let t = &r.calls[2];
+    assert_eq!(t.kind, "title");
+    assert_eq!(t.session_id, f.s1.as_str());
+    assert_eq!(t.session_title.as_deref(), Some("alpha"));
+    assert_eq!(t.workspace_id.as_deref(), Some(ws.as_str()));
+    assert_eq!(t.model, SONNET);
+    assert_eq!(t.status, "ok");
+    assert_eq!(t.stop_reason.as_deref(), Some("end_turn"));
+    assert_eq!(
+        (t.input, t.output, t.cache_read, t.cache_creation),
+        (80, 6, 0, 0)
+    );
+    assert!((t.cost_usd.unwrap() - 0.00022).abs() < 1e-9);
+    assert_eq!(t.total_ms, Some(1500));
+    assert_eq!(t.started_at, "2026-09-11T08:01:00.000Z");
+    // The request event is the one whose blob holds the body.
+    let ev = f
+        .store
+        .get_event(&t.request_event_id.clone().into())
+        .unwrap();
+    assert_eq!(ev.summary.kind, kinds::MENTOR_REQUEST);
+    assert!(ev.blob_id.is_some());
+    let unpriced = &r.calls[0];
+    assert_eq!(unpriced.cost_usd, None);
+    assert_eq!(unpriced.workspace_id, None);
+    assert_eq!(unpriced.session_title.as_deref(), Some("beta"));
+
+    // Paging and the filters.
+    let page = svc
+        .calls(&StatsCallsParams {
+            limit: Some(2),
+            offset: 3,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(page.total, 5);
+    let ids: Vec<_> = page.calls.iter().map(|c| c.call_id.as_str()).collect();
+    assert_eq!(ids, vec![f.calls[1].as_str(), f.calls[0].as_str()]);
+    let r = svc
+        .calls(&StatsCallsParams {
+            workspace_id: Some(ws),
+            since: Some("2026-09-11".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(r.total, 2);
+    assert!(r.calls.iter().all(|c| c.session_id == f.s1.as_str()));
+    let r = svc
+        .calls(&StatsCallsParams {
+            session_id: Some(f.s2.as_str().to_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(r.total, 2);
+    let err = svc
+        .calls(&StatsCallsParams {
+            until: Some("later".into()),
+            ..Default::default()
+        })
+        .unwrap_err();
+    assert_eq!(err.code, codes::INVALID_PARAMS);
 }
 
 #[test]
@@ -370,7 +560,10 @@ async fn stats_methods_over_a_router_round_trip_through_serde() {
         token: None,
     });
     Arc::clone(&svc).register(&mut router);
-    assert_eq!(router.methods(), vec!["stats.reprice", "stats.tokens"]);
+    assert_eq!(
+        router.methods(),
+        vec!["stats.calls", "stats.reprice", "stats.tokens"]
+    );
 
     let (server_side, client_side) = tokio::io::duplex(1 << 16);
     let (sr, sw) = tokio::io::split(server_side);
@@ -402,6 +595,22 @@ async fn stats_methods_over_a_router_round_trip_through_serde() {
         .await
         .unwrap();
     assert_eq!((r.examined, r.changed, r.unpriced), (4, 0, 1));
+
+    let calls = client
+        .call::<StatsCalls>(StatsCallsParams {
+            limit: Some(2),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(calls.total, 4);
+    assert_eq!(calls.calls.len(), 2);
+    assert_eq!(calls.calls[0].call_id, f.calls[3].as_str());
+    let text = serde_json::to_string_pretty(&calls).unwrap();
+    assert_eq!(
+        serde_json::from_str::<apprentice_api::methods::StatsCallsResult>(&text).unwrap(),
+        calls
+    );
 
     let err = client
         .call::<StatsTokens>(StatsTokensParams {

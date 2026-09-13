@@ -255,6 +255,7 @@ fn fake_daemon(home: &Path) -> (Arc<Mutex<Seen>>, tokio::task::JoinHandle<()>) {
                                     cache_creation_input_tokens: 0,
                                 },
                                 session_cost_usd: Some(0.0138),
+                                session_calls: 1,
                             };
                             let _ = conn.notify(&sub, usage).await;
                             (AgentStatus::Ok, None)

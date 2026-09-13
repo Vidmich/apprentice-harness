@@ -10,17 +10,19 @@ use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
     PermissionRespondParams, PromptBlock, PromptShowParams, PromptShowResult, SessionDeleteParams,
     SessionDeleteResult, SessionGetParams, SessionGetResult, SessionListParams, SessionListResult,
-    SessionSearchParams, SessionSearchResult, StatsRepriceParams, StatsRepriceResult,
-    StatsTokensParams, ToolsListParams, ToolsListResult, ToolsRuleParams, ToolsRuleResult,
-    ToolsRulesParams, ToolsRulesResult, TraceGetParams, TraceListParams, WorkspaceAddParams,
-    WorkspaceIdParams, WorkspaceInfoResult, WorkspaceListResult, WorkspaceRemoveResult,
+    SessionSearchParams, SessionSearchResult, StatsCallsParams, StatsCallsResult,
+    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
+    ToolsRuleParams, ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceGetParams,
+    TraceListParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
+    WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
-    AgentSummary, ApprenticeStats, ConfigLayer, Effort, MentorCallInfo, PermissionAnswer,
-    PermissionDecision, PermissionMode, PermissionSource, RuleDefault, RuleEffect, RuleFileInfo,
-    RuleInfo, RuleMatch, RuleSource, RuleSpec, RunOptions, SESSION_EXPORT_FORMAT, SessionExport,
-    SessionInfo, SessionMessage, SessionSearchHit, SessionSummary, StatsRange, TokenBucket,
-    TokenStats, ToolInfo, Usage, WorkspaceSummary,
+    AgentSummary, ApprenticeStats, CallSummary, ConfigLayer, Effort, MentorCallInfo,
+    PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource, RuleDefault,
+    RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource, RuleSpec, RunOptions,
+    SESSION_EXPORT_FORMAT, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
+    SessionSummary, StatsGroup, StatsRange, TokenBucket, TokenStats, ToolInfo, Usage,
+    WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -110,6 +112,15 @@ fn method_param_shapes() {
         }
     );
     assert_json_snapshot!("stats_tokens_params_default", StatsTokensParams::default());
+    assert_json_snapshot!(
+        "stats_tokens_params_grouped",
+        StatsTokensParams {
+            since: Some("7d".into()),
+            workspace_id: Some("w1".into()),
+            group_by: vec![StatsGroup::Day, StatsGroup::Workspace, StatsGroup::Kind],
+            ..StatsTokensParams::default()
+        }
+    );
 }
 
 #[test]
@@ -137,8 +148,67 @@ fn stats_shape() {
             by_model: vec![bucket(Some("claude-opus-5"))],
             by_day: vec![bucket(Some("2026-09-11"))],
             by_session: vec![],
+            by_workspace: vec![],
+            by_kind: vec![bucket(Some("step"))],
             apprentice: ApprenticeStats::default(),
         }
+    );
+    assert_json_snapshot!(
+        "stats_calls",
+        (
+            StatsCallsParams {
+                since: Some("2026-09-01".into()),
+                session_id: Some("s1".into()),
+                limit: Some(50),
+                offset: 100,
+                ..StatsCallsParams::default()
+            },
+            StatsCallsResult {
+                calls: vec![
+                    CallSummary {
+                        call_id: "m2".into(),
+                        started_at: "2026-09-12T10:04:20.000Z".into(),
+                        session_id: "s1".into(),
+                        session_title: Some("Add a hello module".into()),
+                        workspace_id: Some("w1".into()),
+                        agent_id: "a1".into(),
+                        kind: "title".into(),
+                        model: "claude-haiku-4-5-20251001".into(),
+                        effort: None,
+                        status: "ok".into(),
+                        stop_reason: Some("end_turn".into()),
+                        input: 80,
+                        output: 6,
+                        cache_read: 0,
+                        cache_creation: 0,
+                        cost_usd: Some(0.000_11),
+                        total_ms: Some(640),
+                        request_event_id: "e9".into(),
+                    },
+                    CallSummary {
+                        call_id: "m1".into(),
+                        started_at: "2026-09-12T10:04:00.000Z".into(),
+                        session_id: "s1".into(),
+                        session_title: Some("Add a hello module".into()),
+                        workspace_id: Some("w1".into()),
+                        agent_id: "a1".into(),
+                        kind: "step".into(),
+                        model: "claude-opus-5".into(),
+                        effort: Some("high".into()),
+                        status: "error".into(),
+                        stop_reason: None,
+                        input: 0,
+                        output: 0,
+                        cache_read: 0,
+                        cache_creation: 0,
+                        cost_usd: None,
+                        total_ms: Some(12_030),
+                        request_event_id: "e7".into(),
+                    },
+                ],
+                total: 102,
+            }
+        )
     );
     assert_json_snapshot!(
         "stats_reprice",
@@ -251,6 +321,7 @@ fn session_shapes() {
         running_agent: Some("a2".into()),
         usage,
         cost_usd: Some(0.0138),
+        calls: 2,
     };
     assert_json_snapshot!(
         "session_list",
@@ -606,6 +677,7 @@ fn event_shapes() {
                 cache_creation_input_tokens: 900,
             },
             session_cost_usd: Some(0.0276),
+            session_calls: 2,
         },
         Event::AgentWarning {
             agent_id: "a1".into(),

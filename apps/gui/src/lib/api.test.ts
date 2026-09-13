@@ -22,6 +22,9 @@ import {
   type SessionListResult,
   type SessionSearchParams,
   type SessionSearchResult,
+  type StatsCallsParams,
+  type StatsCallsResult,
+  type StatsTokensParams,
   type TokenStats,
   type ToolsListResult,
   type WorkspaceAddParams,
@@ -141,6 +144,7 @@ describe("api.ts against the Rust snapshots", () => {
     expect(list.sessions[0]?.last_agent_status).toBe("ok");
     expect(list.sessions[0]?.running_agent).toBe("a2");
     expect(list.sessions[0]?.cost_usd).toBe(0.0138);
+    expect(list.sessions[0]?.calls).toBe(2);
     const [, got] = snapshot("session_get") as [SessionGetParams, SessionGetResult];
     expect(got.session.prompt_version).toBe("mentor_system_v1");
     expect(got.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
@@ -164,8 +168,24 @@ describe("api.ts against the Rust snapshots", () => {
     expect(added.id).toBe("w1");
   });
 
+  it("reads token stats with the new breakdowns and a page of calls", () => {
+    const stats = snapshot("token_stats") as TokenStats;
+    expect(stats.by_kind[0]?.key).toBe("step");
+    expect(stats.by_workspace).toEqual([]);
+    const grouped = snapshot("stats_tokens_params_grouped") as StatsTokensParams;
+    expect(grouped.group_by).toEqual(["day", "workspace", "kind"]);
+    const [params, page] = snapshot("stats_calls") as [StatsCallsParams, StatsCallsResult];
+    expect(params.offset).toBe(100);
+    expect(page.total).toBe(102);
+    expect(page.calls.map((c) => [c.kind, c.status, c.cost_usd])).toEqual([
+      ["title", "ok", 0.00011],
+      ["step", "error", undefined],
+    ]);
+    expect(page.calls[0]?.request_event_id).toBe("e9");
+  });
+
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(35);
+    expect(ALL_METHODS.length).toBe(36);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

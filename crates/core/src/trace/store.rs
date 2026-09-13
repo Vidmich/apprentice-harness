@@ -303,6 +303,17 @@ pub struct CallFilter {
     pub status: Option<RunStatus>,
     pub since: Option<String>,
     pub until: Option<String>,
+    /// Only calls of sessions on this workspace (task M01-13).
+    pub workspace_id: Option<String>,
+}
+
+/// One row of [`TraceStore::list_calls_page`]: the call with what the
+/// `stats.calls` table shows of its session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallListRow {
+    pub call: MentorCallRow,
+    pub session_title: Option<String>,
+    pub workspace_id: Option<String>,
 }
 
 impl CallFilter {
@@ -337,6 +348,11 @@ pub enum GroupBy {
     Day { offset_secs: i32 },
     /// Key = session id, label = session title.
     Session,
+    /// Key = workspace id (`""` for sessions without one), label = the
+    /// workspace root (task M01-13).
+    Workspace,
+    /// Key = call kind (`step` | `title`).
+    Kind,
 }
 
 /// One group of [`TraceStore::stats_by`].
@@ -948,6 +964,42 @@ impl TraceStore {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// A page of matching calls, newest first, with the session's title
+    /// and workspace, and the number of matching calls in all.
+    pub fn list_calls_page(
+        &self,
+        f: &CallFilter,
+        limit: u32,
+        offset: u64,
+    ) -> Result<(Vec<CallListRow>, u64)> {
+        let (where_sql, args) = call_where(f);
+        let conn = self.lock();
+        let total: i64 = conn.query_row(
+            &format!("SELECT COUNT(*) FROM mentor_calls c WHERE {where_sql}"),
+            rusqlite::params_from_iter(args.iter()),
+            |r| r.get(0),
+        )?;
+        let sql = format!(
+            "SELECT {}, s.title, s.workspace_id
+             FROM mentor_calls c LEFT JOIN sessions s ON s.id = c.session_id
+             WHERE {where_sql} ORDER BY c.started_at DESC, c.id DESC
+             LIMIT {limit} OFFSET {offset}",
+            mentor_call_fields!()
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args), |r| {
+            Ok(CallListRow {
+                call: mentor_call_row(r)?,
+                session_title: r.get(23)?,
+                workspace_id: r.get(24)?,
+            })
+        })?;
+        Ok((
+            rows.collect::<rusqlite::Result<_>>()?,
+            u64::try_from(total).unwrap_or(0),
+        ))
+    }
+
     /// Token and cost sums over matching calls.
     pub fn stats(&self, f: &CallFilter) -> Result<UsageTotals> {
         let (where_sql, args) = call_where(f);
@@ -972,12 +1024,21 @@ impl TraceStore {
         })?)
     }
 
-    /// Token and cost sums per group. Model and day groups are ordered by
-    /// key; session groups by cost (highest first), then key.
+    /// Token and cost sums per group. Model, day and kind groups are
+    /// ordered by key; session and workspace groups by cost (highest
+    /// first), then key.
     pub fn stats_by(&self, f: &CallFilter, group: GroupBy) -> Result<Vec<GroupedTotals>> {
         let (where_sql, args) = call_where(f);
         let (key_expr, label_expr, from, order) = match group {
             GroupBy::Model => ("c.model", "NULL", "mentor_calls c", "1"),
+            GroupBy::Kind => ("c.kind", "NULL", "mentor_calls c", "1"),
+            GroupBy::Workspace => (
+                "COALESCE(s.workspace_id, '')",
+                "COALESCE(w.root, s.workspace_path)",
+                "mentor_calls c LEFT JOIN sessions s ON s.id = c.session_id
+                 LEFT JOIN workspaces w ON w.id = s.workspace_id",
+                "6 DESC, 1",
+            ),
             GroupBy::Day { offset_secs } => {
                 // `date()` accepts the `...Z` timestamps written by `now_ts`.
                 let expr = format!("date(c.started_at, '{offset_secs:+} seconds')");
@@ -1540,12 +1601,20 @@ fn trace_event(r: &Row<'_>) -> rusqlite::Result<TraceEvent> {
     })
 }
 
+/// The columns [`mentor_call_row`] reads, qualified so a join can add
+/// its own after them.
+macro_rules! mentor_call_fields {
+    () => {
+        "c.id, c.session_id, c.agent_id, c.step_id, c.request_event_id, c.response_event_id,
+         c.model, c.effort, c.started_at, c.ended_at, c.status, c.stop_reason, c.http_status,
+         c.input_tokens, c.output_tokens, c.cache_read_tokens, c.cache_creation_tokens,
+         c.cost_micros, c.first_byte_ms, c.total_ms, c.request_bytes, c.apprentice_applied, c.kind"
+    };
+}
+pub(super) use mentor_call_fields;
+
 pub(super) const MENTOR_CALL_COLUMNS: &str =
-    "SELECT id, session_id, agent_id, step_id, request_event_id, response_event_id,
-            model, effort, started_at, ended_at, status, stop_reason, http_status,
-            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-            cost_micros, first_byte_ms, total_ms, request_bytes, apprentice_applied, kind
-     FROM mentor_calls c";
+    concat!("SELECT ", mentor_call_fields!(), " FROM mentor_calls c");
 
 pub(super) fn mentor_call_row(r: &Row<'_>) -> rusqlite::Result<MentorCallRow> {
     let status: String = r.get(10)?;
@@ -1756,6 +1825,12 @@ fn call_where(f: &CallFilter) -> (String, SqlArgs) {
     }
     if let Some(u) = &f.until {
         bind("c.started_at < ?", u.as_str().to_owned().into());
+    }
+    if let Some(w) = &f.workspace_id {
+        bind(
+            "c.session_id IN (SELECT id FROM sessions WHERE workspace_id = ?)",
+            w.as_str().to_owned().into(),
+        );
     }
     if clauses.is_empty() {
         clauses.push("1".to_owned());

@@ -21,6 +21,7 @@ import {
 import { type Unsubscribe, newChannel, subscribe } from "./events";
 import { RpcFailure, call, describe, stream } from "./rpc";
 import { refreshSessions, refreshWorkspaces } from "./sessions";
+import { refreshUsage } from "./usage";
 import {
   type Transcript,
   applyEvent,
@@ -190,10 +191,13 @@ async function finish(sessionId: string): Promise<void> {
   update(sessionId, clearLive);
   // The run may have changed the tree (the dirty marker) and the row.
   void refreshWorkspaces().then(refreshSessions);
+  if (useStore.getState().view === "usage") void refreshUsage();
   const t = transcriptOf(sessionId);
   if (t?.info?.title_source !== "user") {
     setTimeout(() => {
       void refreshInfo(sessionId).then(refreshSessions);
+      // The title call is a mentor call too.
+      if (useStore.getState().view === "usage") void refreshUsage();
     }, TITLE_DELAY_MS);
   }
 }

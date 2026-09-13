@@ -35,7 +35,9 @@ sessions (list, search, rename, archive, delete, export), `agent.run`
 with a canned streamed answer (thinking, markdown, a read, an edit with
 a diff, a shell with streamed output), cancel, reattach after a reload,
 the trace events behind the Raw tab, the config keys the settings
-screen shows and the permission rules. Words in the prompt steer it:
+screen shows, the permission rules, and the mentor calls behind the
+usage panel (`stats.tokens`, `stats.calls`, the request bodies) with
+ten days of seeded history. Words in the prompt steer it:
 `fail` (an error before any tool, for Retry), `slow` (a minute-long
 shell, for Cancel and reload), `big` (5 MB of shell output), `warn` (a
 warning in the footer), `ask` (the edit asks for permission unless a
@@ -88,18 +90,25 @@ manual checklist for both.
   `permissions.test.ts`); `respondPermission` in `chat.ts` answers.
   `src/lib/settings.ts` — the config keys the settings screen shows and
   their reads/writes (`config.get` per key for the source, `config.set`
-  to a layer).
+  to a layer). `src/lib/usage.ts` — the usage panel: the range presets
+  as `stats.tokens` / `stats.calls` params, the CSV of the calls (the
+  CLI's columns, `usage.test.ts`), the request body from `trace.get`.
 - `src/store.ts` (app state, the workspaces and the selected one, the
   chats — persisted in `localStorage` so a reload finds its sessions —
   and the composer settings), `src/stores/transcripts.ts` (one
   transcript per session, the five most recent kept),
   `src/stores/sessions.ts` (the list and the search hits),
-  `src/stores/permissions.ts` (the open requests).
+  `src/stores/permissions.ts` (the open requests), `src/stores/usage.ts`
+  (the panel's range, chart mode, what it last read, the drawer),
+  `src/stores/jump.ts` (a pending "show this turn" the transcript
+  scrolls to).
 - `src/components/sidebar/` — `WorkspaceSwitcher` (branch and dirty
   marker), `SessionList` (Today / Yesterday / Earlier, the search, the
   drafts), `SessionRow` (status dot, cost, the row menu).
   `PermissionDialog` and `Toasts` sit over the chat; `settings/` is the
-  settings screen (`SettingField`, `RulesEditor`).
+  settings screen (`SettingField`, `RulesEditor`); `usage/` is the
+  usage panel (`Usage`, `BarChart` — a plain SVG —, `BucketTable`,
+  `CallsTable`, `RequestDrawer`).
 - `src/components/chat/` — `TranscriptView` (sticks to the bottom,
   virtualises above 200 items), `Markdown` + `CodeBlock` (react-markdown,
   Shiki loaded on first use, both themes as CSS variables), `ToolCard`

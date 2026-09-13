@@ -88,6 +88,9 @@ pub struct SessionSummary {
     /// Cost of those calls; absent when one had no price.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Mentor calls of the session (every kind), task M01-13.
+    #[serde(default)]
+    pub calls: u64,
 }
 
 fn default_session_status() -> String {
@@ -432,7 +435,30 @@ pub struct RuleFileInfo {
     pub error: Option<String>,
 }
 
-/// Aggregated token statistics (see task M00-07).
+/// A breakdown `stats.tokens` can be asked for (task M01-13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatsGroup {
+    /// Local days of the call start (`YYYY-MM-DD`).
+    Day,
+    /// Model id.
+    Model,
+    /// Session id, labelled with the title.
+    Session,
+    /// Workspace id (empty for sessions without one), labelled with the
+    /// root.
+    Workspace,
+    /// What the call was for: `step` | `title`.
+    Kind,
+}
+
+impl StatsGroup {
+    /// The breakdowns of a request without `group_by` (task M00-07's).
+    pub const DEFAULT: &'static [Self] = &[Self::Model, Self::Day, Self::Session];
+}
+
+/// Aggregated token statistics (see task M00-07). Only the requested
+/// breakdowns are filled; the others stay empty.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenStats {
     pub range: StatsRange,
@@ -445,7 +471,45 @@ pub struct TokenStats {
     pub by_day: Vec<TokenBucket>,
     #[serde(default)]
     pub by_session: Vec<TokenBucket>,
+    #[serde(default)]
+    pub by_workspace: Vec<TokenBucket>,
+    #[serde(default)]
+    pub by_kind: Vec<TokenBucket>,
     pub apprentice: ApprenticeStats,
+}
+
+/// One mentor call as `stats.calls` lists it (task M01-13): the row of
+/// `mentor_calls` with its session's title and workspace.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CallSummary {
+    pub call_id: String,
+    pub started_at: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub agent_id: String,
+    /// `step` | `title`.
+    pub kind: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// `running` | `ok` | `cancelled` | `error`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+    /// Absent while running, after a failure, or without a price.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_ms: Option<u64>,
+    /// The `mentor.request` event; its blob is the exact body sent.
+    pub request_event_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

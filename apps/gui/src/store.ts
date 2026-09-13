@@ -18,7 +18,7 @@ import type { AppInfo, DaemonStatus } from "./lib/rpc";
 export type SendKey = "enter" | "ctrl_enter";
 
 /** What the main pane shows. */
-export type View = "chat" | "settings";
+export type View = "chat" | "settings" | "usage";
 
 export interface Chat {
   id: number;

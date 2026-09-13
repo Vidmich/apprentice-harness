@@ -780,6 +780,7 @@ impl<'a> Run<'a> {
             cost_usd: cost_micros.map(micros_to_usd),
             session_usage: conv.totals(),
             session_cost_usd: conv.cost_micros().map(micros_to_usd),
+            session_calls: conv.calls(),
         });
         Ok(())
     }

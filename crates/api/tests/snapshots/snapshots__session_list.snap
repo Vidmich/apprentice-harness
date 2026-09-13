@@ -28,7 +28,8 @@ expression: "(SessionListParams\n{\n    query: Some(\"hello\".into()), workspace
           "cache_read_input_tokens": 900,
           "cache_creation_input_tokens": 0
         },
-        "cost_usd": 0.0138
+        "cost_usd": 0.0138,
+        "calls": 2
       }
     ]
   }

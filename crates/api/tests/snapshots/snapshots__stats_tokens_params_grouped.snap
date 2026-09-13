@@ -1,0 +1,13 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "StatsTokensParams\n{\n    since: Some(\"7d\".into()), workspace_id: Some(\"w1\".into()), group_by:\n    vec![StatsGroup::Day, StatsGroup::Workspace, StatsGroup::Kind],\n    ..StatsTokensParams::default()\n}"
+---
+{
+  "since": "7d",
+  "workspace_id": "w1",
+  "group_by": [
+    "day",
+    "workspace",
+    "kind"
+  ]
+}

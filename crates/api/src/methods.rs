@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::types::{
-    AgentSummary, ConfigLayer, ConfigSource, EventSummary, PermissionAnswer, RuleFileInfo,
-    RuleInfo, RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage,
-    SessionSearchHit, SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
+    AgentSummary, CallSummary, ConfigLayer, ConfigSource, EventSummary, PermissionAnswer,
+    RuleFileInfo, RuleInfo, RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo,
+    SessionMessage, SessionSearchHit, SessionSummary, StatsGroup, TokenStats, ToolInfo, TraceEvent,
+    WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -445,6 +446,10 @@ method!(TraceGet, "trace.get", TraceGetParams, TraceGetResult);
 
 // ---------------------------------------------------------------- stats.*
 
+/// `stats.tokens`: totals and breakdowns over the mentor calls in a
+/// range. `group_by` names the breakdowns wanted (task M01-13); empty
+/// means [`StatsGroup::DEFAULT`]. `by_session` stays empty for a query
+/// limited to one session.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct StatsTokensParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,9 +458,54 @@ pub struct StatsTokensParams {
     pub until: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Only the sessions of this workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_by: Vec<StatsGroup>,
 }
 
 method!(StatsTokens, "stats.tokens", StatsTokensParams, TokenStats);
+
+/// `stats.calls`: the individual mentor calls behind the numbers, newest
+/// first, paged (task M01-13). Times compare against the call start.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StatsCallsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Rows per page; default [`StatsCallsParams::DEFAULT_LIMIT`], at most
+    /// [`StatsCallsParams::MAX_LIMIT`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Rows to skip (newest first).
+    #[serde(default)]
+    pub offset: u64,
+}
+
+impl StatsCallsParams {
+    pub const DEFAULT_LIMIT: u32 = 100;
+    pub const MAX_LIMIT: u32 = 1000;
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StatsCallsResult {
+    pub calls: Vec<CallSummary>,
+    /// Matching calls in all, for paging.
+    pub total: u64,
+}
+
+method!(
+    StatsCalls,
+    "stats.calls",
+    StatsCallsParams,
+    StatsCallsResult
+);
 
 /// Recomputes `cost_micros` of stored mentor calls from the current pricing
 /// table. All filters are optional; times compare against the call start.
@@ -774,6 +824,7 @@ pub const ALL_METHODS: &[&str] = &[
     TraceList::NAME,
     TraceGet::NAME,
     StatsTokens::NAME,
+    StatsCalls::NAME,
     StatsReprice::NAME,
     ToolsList::NAME,
     ToolsRules::NAME,

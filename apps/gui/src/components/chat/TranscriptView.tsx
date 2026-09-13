@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { loadOlder } from "../../lib/chat";
 import { type Item, type Transcript, deriveItems } from "../../lib/transcript";
+import { MAX_PAGES, useJump } from "../../stores/jump";
 import { ItemView } from "./Items";
 
 /** Transcripts longer than this render through the virtualiser. */
@@ -67,6 +68,44 @@ export default function TranscriptView({ transcript, onRetryAgent, onRetryPrompt
     if (!virtual) el.scrollTop = a.top + (el.scrollHeight - a.height);
   }, [oldestSeq, virtual]);
 
+  // A jump to an agent's turn (from the usage panel): scroll to its
+  // first item once it is here, loading older pages until it is.
+  const jump = useJump((s) => s.target);
+  const [flash, setFlash] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (jump === undefined || jump.sessionId !== transcript.sessionId) return;
+    const index = items.findIndex((it) => "agentId" in it && it.agentId === jump.agentId);
+    if (index >= 0) {
+      const item = items[index]!;
+      useJump.getState().clear();
+      setStick(false);
+      if (virtual) virtualizer.scrollToIndex(index, { align: "start" });
+      else {
+        scroller.current
+          ?.querySelector(`[data-key="${CSS.escape(item.key)}"]`)
+          ?.scrollIntoView({ block: "start" });
+      }
+      setFlash(jump.agentId);
+      const t = setTimeout(() => setFlash(undefined), 2000);
+      return () => clearTimeout(t);
+    }
+    if (transcript.loading) return;
+    if (!transcript.hasOlder || jump.pages >= MAX_PAGES) {
+      useJump.getState().clear();
+      return;
+    }
+    useJump.getState().paged();
+    void loadOlder(transcript.sessionId);
+  }, [
+    jump,
+    items,
+    transcript.sessionId,
+    transcript.loading,
+    transcript.hasOlder,
+    virtual,
+    virtualizer,
+  ]);
+
   const onScroll = useCallback(() => {
     const el = scroller.current;
     if (el === null) return;
@@ -82,13 +121,21 @@ export default function TranscriptView({ transcript, onRetryAgent, onRetryPrompt
   }, [transcript.hasOlder, transcript.loading, transcript.messages, transcript.sessionId]);
 
   const render = (item: Item) => (
-    <ItemView
-      item={item}
-      sessionId={transcript.sessionId}
-      now={now}
-      onRetryAgent={onRetryAgent}
-      onRetryPrompt={onRetryPrompt}
-    />
+    <div
+      className={
+        flash !== undefined && "agentId" in item && item.agentId === flash
+          ? "jump-flash"
+          : undefined
+      }
+    >
+      <ItemView
+        item={item}
+        sessionId={transcript.sessionId}
+        now={now}
+        onRetryAgent={onRetryAgent}
+        onRetryPrompt={onRetryPrompt}
+      />
+    </div>
   );
 
   return (
@@ -132,7 +179,11 @@ export default function TranscriptView({ transcript, onRetryAgent, onRetryPrompt
           })}
         </div>
       ) : (
-        items.map((item) => <div key={item.key}>{render(item)}</div>)
+        items.map((item) => (
+          <div key={item.key} data-key={item.key}>
+            {render(item)}
+          </div>
+        ))
       )}
       {items.length === 0 && !transcript.loading && transcript.loadError === undefined && (
         <p className="mt-16 text-center text-sm text-muted">Ask the mentor something.</p>

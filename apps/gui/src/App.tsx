@@ -6,6 +6,7 @@ import Setup from "./components/Setup";
 import Sidebar from "./components/Sidebar";
 import StatusBar from "./components/StatusBar";
 import Toasts from "./components/Toasts";
+import Usage from "./components/usage/Usage";
 import { pendingFor } from "./lib/permissions";
 import { newSession } from "./lib/sessions";
 import { authConfigured, useStore } from "./store";
@@ -27,7 +28,8 @@ export default function App() {
     activeSession === undefined ? undefined : s.transcripts[activeSession],
   );
 
-  // Ctrl+N: a new session on the selected workspace; Ctrl+,: settings.
+  // Ctrl+N: a new session on the selected workspace; Ctrl+,: settings;
+  // Ctrl+U: usage.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -37,6 +39,9 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         setView(view === "settings" ? "chat" : "settings");
+      } else if (e.key === "u") {
+        e.preventDefault();
+        setView(view === "usage" ? "chat" : "usage");
       }
     };
     window.addEventListener("keydown", onKey);
@@ -60,6 +65,8 @@ export default function App() {
     main = <Setup />;
   } else if (view === "settings") {
     main = <Settings />;
+  } else if (view === "usage") {
+    main = <Usage />;
   } else if (chat !== undefined) {
     main = <Chat key={chat.id} chat={chat} />;
   }

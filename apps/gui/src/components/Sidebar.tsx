@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import SessionList from "./sidebar/SessionList";
 import WorkspaceSwitcher from "./sidebar/WorkspaceSwitcher";
 
-/** Left pane: the workspace switcher, the new-session and settings buttons, the sessions. */
+/** Left pane: the workspace switcher, the new-session, usage and settings buttons, the sessions. */
 export default function Sidebar() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
@@ -21,6 +21,16 @@ export default function Sidebar() {
           title="New session (Ctrl+N)"
         >
           + New session
+        </button>
+        <button
+          type="button"
+          className={`btn px-2 ${view === "usage" ? "border-accent" : ""}`}
+          onClick={() => setView(view === "usage" ? "chat" : "usage")}
+          title="Usage and cost (Ctrl+U)"
+          aria-label="Usage"
+          aria-pressed={view === "usage"}
+        >
+          $
         </button>
         <button
           type="button"

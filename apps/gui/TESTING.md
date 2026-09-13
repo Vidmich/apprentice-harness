@@ -169,3 +169,36 @@ Two checkouts help (any two folders; a git work tree shows the branch).
 status`); reopening the app restores the selected workspace and
       the last session. The tray icon offers "Show", "Quit (daemon keeps
       running)" and "Quit and stop the daemon" — the last one stops it.
+
+## Usage and cost (task M01-13)
+
+- [ ] Session header: after a run the right side reads
+      `in 182k · out 21k · cached 610k · $1.84 · 14 calls` and updates
+      with every `agent.usage` (no reload); hovering shows the exact
+      numbers. `harness stats tokens --session <id>` prints the same
+      totals and call count (the title call included once it ran, a
+      few seconds after the run: the header re-reads then).
+- [ ] Usage panel (`$` or `Ctrl+U`): the tiles, the bar chart (cost;
+      _tokens_ toggles), the tables by model, kind, workspace and
+      session, and the calls table match
+      `harness stats tokens --since 7d --by model --by kind --by workspace --by session`
+      and `harness stats calls --since 7d` for the same range;
+      _Today_ / _7 days_ / _30 days_ / _Custom_ (a since and until
+      date, the until day included) change all of them together;
+      picking a workspace in the sidebar narrows the panel to it
+      (`--workspace <id>`).
+- [ ] Kind: the title calls show as `title` in the kind table and the
+      calls table (a badge), on the cheap model, and are in the totals.
+- [ ] Calls table: newest first, 50 a page (`‹` `›`); a session link
+      opens the session scrolled to that turn (older pages load on the
+      way); _View request_ opens the drawer with the stored
+      `mentor.request` body, pretty-printed — the same bytes as
+      `harness trace get <request_event_id> --blob` (`copy`, `save…`,
+      `Esc` closes). An error call shows `error` in red and no cost; a
+      model without a `[pricing]` entry shows `–` and a `*` on the
+      totals.
+- [ ] _Export CSV_ saves every call of the range where you choose; the
+      file opens in a spreadsheet with the 18 columns of
+      `harness stats calls --csv` (quoted titles with commas intact).
+- [ ] After a run ends while the panel is showing, it re-reads by
+      itself (and again when the title call lands).

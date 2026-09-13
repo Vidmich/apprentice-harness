@@ -99,7 +99,8 @@ expression: notifications
         "cache_read_input_tokens": 900,
         "cache_creation_input_tokens": 900
       },
-      "session_cost_usd": 0.0276
+      "session_cost_usd": 0.0276,
+      "session_calls": 2
     }
   },
   {

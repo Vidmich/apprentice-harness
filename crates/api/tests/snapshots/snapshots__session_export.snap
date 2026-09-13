@@ -24,6 +24,7 @@ expression: "SessionExport\n{\n    format: SESSION_EXPORT_FORMAT.into(), exporte
       "cache_creation_input_tokens": 0
     },
     "cost_usd": 0.0138,
+    "calls": 2,
     "title_source": "generated",
     "prompt_version": "mentor_system_v1",
     "tools_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",

@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef } from "react";
 import { cancel, openSession, reloadSession, send } from "../lib/chat";
+import { sessionTotals, thousands, usd } from "../lib/format";
 import { addWorkspace } from "../lib/sessions";
 import { promptOf } from "../lib/transcript";
 import { type Chat as ChatTab, useStore } from "../store";
@@ -69,6 +70,12 @@ export default function Chat({ chat }: { chat: ChatTab }) {
   };
 
   const workspace = transcript?.info?.workspace ?? chat.workspace;
+  const info = transcript?.info;
+  // The exact numbers behind the compact line, on hover.
+  const totalsTitle =
+    info === undefined
+      ? ""
+      : `input ${thousands(info.usage.input_tokens)} · output ${thousands(info.usage.output_tokens)} · cache read ${thousands(info.usage.cache_read_input_tokens)} · cache write ${thousands(info.usage.cache_creation_input_tokens)}${info.cost_usd === undefined ? " · cost unknown (an unpriced model)" : ` · ${usd(info.cost_usd)}`} · ${info.calls} mentor calls (title calls included)`;
   let disabledHint: string | undefined;
   if (!connected) disabledHint = "Waiting for the daemon…";
   else if (sessionId === undefined && chat.workspace.trim() === "") {
@@ -101,6 +108,15 @@ export default function Chat({ chat }: { chat: ChatTab }) {
               {workspace ?? "(no workspace)"}
             </span>
             <span className="grow" />
+            {info !== undefined && info.calls > 0 && (
+              <span
+                className="shrink-0 font-mono text-[11px] text-muted"
+                title={totalsTitle}
+                data-testid="session-totals"
+              >
+                {sessionTotals(info.usage, info.cost_usd, info.calls)}
+              </span>
+            )}
             <span className="font-mono text-[11px] text-muted" title="Session id">
               {sessionId}
             </span>

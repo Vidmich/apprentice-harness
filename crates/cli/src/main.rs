@@ -347,6 +347,39 @@ mod tests {
             c.command,
             Command::Stats(stats::StatsCommand::Reprice(_))
         ));
+        let c = Cli::try_parse_from([
+            "harness",
+            "stats",
+            "calls",
+            "--since",
+            "2026-09-01",
+            "--workspace",
+            "w1",
+            "--limit",
+            "50",
+            "--offset",
+            "100",
+            "--csv",
+        ])
+        .unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Stats(stats::StatsCommand::Calls(_))
+        ));
+        let c = Cli::try_parse_from([
+            "harness",
+            "stats",
+            "tokens",
+            "--by",
+            "workspace",
+            "--by",
+            "kind",
+        ])
+        .unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Stats(stats::StatsCommand::Tokens(_))
+        ));
     }
 
     #[test]

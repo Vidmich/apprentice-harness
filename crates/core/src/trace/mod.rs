@@ -35,9 +35,10 @@ pub use sessions::{
     DeleteReport, NewMessage, SessionQuery, StoredMessage, first_prompt_title, fts_query,
 };
 pub use store::{
-    AgentRecord, BlobInput, BlobMeta, CallFilter, DiskUsage, EventQuery, GroupBy, GroupedTotals,
-    IntegrityReport, MAX_PAGE, MentorCallEnd, MentorCallRow, MentorCallStart, NewAgent, NewEvent,
-    NewSession, RepriceReport, SessionRecord, StepRecord, TraceStore, UsageTotals, WorkspaceRecord,
+    AgentRecord, BlobInput, BlobMeta, CallFilter, CallListRow, DiskUsage, EventQuery, GroupBy,
+    GroupedTotals, IntegrityReport, MAX_PAGE, MentorCallEnd, MentorCallRow, MentorCallStart,
+    NewAgent, NewEvent, NewSession, RepriceReport, SessionRecord, StepRecord, TraceStore,
+    UsageTotals, WorkspaceRecord,
 };
 pub use writer::{MAX_BATCH, QUEUE_CAPACITY, TraceWriter};
 

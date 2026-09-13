@@ -5,7 +5,10 @@
 // with streamed output, `agent.cancel`, `agent.subscribe`, and the trace
 // events behind the Raw tab; workspaces, the sessions list and search,
 // rename/archive/delete/export, the config and the permission rules
-// (task M01-12). Words in the prompt steer the script: "fail" ends the
+// (task M01-12); the mentor calls behind `stats.tokens` / `stats.calls`
+// with their request bodies in the trace, and ten days of seeded
+// history for the usage panel (task M01-13). Words in the prompt steer
+// the script: "fail" ends the
 // run with an error before any tool, "slow" makes the shell run for a
 // minute (try Cancel), "big" gives it 5 MB of output, "ask" makes the
 // edit ask for permission (unless a rule in the mock's files allows or
@@ -16,6 +19,7 @@
 
 import type {
   AgentSummary,
+  CallSummary,
   EventNotification,
   EventSummary,
   RpcError,
@@ -25,6 +29,8 @@ import type {
   SessionInfo,
   SessionMessage,
   SessionSearchHit,
+  StatsGroup,
+  TokenBucket,
   TraceEvent,
   Usage,
   WorkspaceSummary,
@@ -70,6 +76,7 @@ interface Persisted {
   sessions: Session[];
   runs: { agentId: string; sessionId: string; prompt: string }[];
   trace: { event: TraceEvent; blob?: string }[];
+  calls?: CallSummary[];
   workspaces?: WorkspaceSummary[];
   config?: Record<string, unknown>;
   workspaceConfig?: Record<string, Record<string, unknown>>;
@@ -93,6 +100,19 @@ const DEFAULTS: Record<string, unknown> = {
 };
 
 const WORKSPACE_KEYS = /^(mentor\.(model|effort|max_tokens)|permissions\.|tools\.|runtime\.)/;
+
+/** The mock's price table: USD per token, in and out. */
+const PRICES: Record<string, [number, number]> = {
+  "claude-opus-5": [0.000005, 0.000025],
+  "claude-sonnet-5": [0.000003, 0.000015],
+  "claude-haiku-4-5-20251001": [0.000001, 0.000005],
+};
+const TITLE_MODEL = "claude-haiku-4-5-20251001";
+
+function priceOf(model: string, input: number, output: number): number | undefined {
+  const p = PRICES[model];
+  return p === undefined ? undefined : input * p[0] + output * p[1];
+}
 
 const BUILTIN_RULES: RuleInfo[] = [
   {
@@ -172,6 +192,8 @@ export function mockBackend(): Backend {
   const trace = new Map<string, { event: TraceEvent; blob?: string }>();
   const listeners = new Map<string, Set<EventHandler<unknown>>>();
   const workspaces = new Map<string, WorkspaceSummary>();
+  /** Every mentor call, oldest first. */
+  const calls: CallSummary[] = [];
   const asks = new Map<string, Ask>();
   let config: Record<string, unknown> = {};
   let workspaceConfig: Record<string, Record<string, unknown>> = {};
@@ -193,6 +215,7 @@ export function mockBackend(): Backend {
         trace: [...trace.values()].map((e) =>
           e.blob !== undefined && e.blob.length <= KEEP_BLOB_BYTES ? e : { event: e.event },
         ),
+        calls,
         workspaces: [...workspaces.values()],
         config,
         workspaceConfig,
@@ -252,6 +275,7 @@ export function mockBackend(): Backend {
       message_count: 0,
       last_activity: ts,
       usage: zero,
+      calls: 0,
       config: {},
     };
     const s = { info, messages: [], agents: [] };
@@ -259,22 +283,89 @@ export function mockBackend(): Backend {
     return s;
   }
 
+  /** Totals over some calls, the daemon's way (a cost only when every call has one). */
+  function totalsOf(rows: CallSummary[]): {
+    usage: Usage;
+    cost?: number;
+    calls: number;
+    unpriced: number;
+  } {
+    const usage = { ...zero };
+    let cost = 0;
+    let unpriced = 0;
+    for (const c of rows) {
+      usage.input_tokens += c.input;
+      usage.output_tokens += c.output;
+      usage.cache_read_input_tokens += c.cache_read;
+      usage.cache_creation_input_tokens += c.cache_creation;
+      if (c.cost_usd === undefined) {
+        if (c.status === "ok") unpriced += 1;
+      } else cost += c.cost_usd;
+    }
+    const out: ReturnType<typeof totalsOf> = { usage, calls: rows.length, unpriced };
+    if (unpriced === 0) out.cost = cost;
+    return out;
+  }
+
+  /**
+   * Records a completed mentor call: its `mentor.request` event with the
+   * body as the blob, and the row `stats.calls` lists.
+   */
+  function recordCall(
+    s: Session,
+    agentId: string,
+    kind: "step" | "title",
+    model: string,
+    input: number,
+    output: number,
+    over: Partial<CallSummary> = {},
+  ): CallSummary {
+    const startedAt = over.started_at ?? now();
+    const body = JSON.stringify({
+      model,
+      max_tokens: kind === "title" ? 32 : 64000,
+      system: kind === "title" ? "Name this conversation in a few words." : "(the system prompt)",
+      messages: s.messages.slice(-4).map((m) => ({ role: m.role, content: m.content })),
+      thinking: kind === "title" ? undefined : { type: "adaptive" },
+    });
+    const eventId = record(s, agentId, "mentor.request", { model, kind, bytes: body.length }, body);
+    const c: CallSummary = {
+      call_id: nextId("m"),
+      started_at: startedAt,
+      session_id: s.info.id,
+      agent_id: agentId,
+      kind,
+      model,
+      status: "ok",
+      stop_reason: "end_turn",
+      input,
+      output,
+      cache_read: 0,
+      cache_creation: 0,
+      total_ms: 400 + Math.round(output * 12),
+      request_event_id: eventId,
+      ...over,
+    };
+    if (s.info.title !== undefined && s.info.title !== null) c.session_title = s.info.title;
+    if (s.info.workspace_id !== undefined && s.info.workspace_id !== null) {
+      c.workspace_id = s.info.workspace_id;
+    }
+    if (kind === "step") c.effort = "high";
+    if (c.status !== "ok") delete c.stop_reason;
+    const cost = c.status === "ok" ? priceOf(model, input, output) : undefined;
+    if (cost !== undefined) c.cost_usd = cost;
+    calls.push(c);
+    save();
+    return c;
+  }
+
   /** The list row of a session, with the totals and the running agent. */
   function summary(s: Session): SessionInfo {
-    const usage = s.agents.reduce(
-      (acc, a) => ({
-        input_tokens: acc.input_tokens + a.usage.input_tokens,
-        output_tokens: acc.output_tokens + a.usage.output_tokens,
-        cache_read_input_tokens: acc.cache_read_input_tokens + a.usage.cache_read_input_tokens,
-        cache_creation_input_tokens:
-          acc.cache_creation_input_tokens + a.usage.cache_creation_input_tokens,
-      }),
-      zero,
-    );
-    const cost = s.agents.reduce((acc, a) => acc + (a.cost_usd ?? 0), 0);
+    const mine = calls.filter((c) => c.session_id === s.info.id);
+    const t = totalsOf(mine);
     const last = s.agents[s.agents.length - 1];
-    const out: SessionInfo = { ...s.info, usage };
-    if (cost > 0) out.cost_usd = cost;
+    const out: SessionInfo = { ...s.info, usage: t.usage, calls: t.calls };
+    if (t.cost !== undefined && t.calls > 0) out.cost_usd = t.cost;
     if (last !== undefined && last.status !== "running") {
       out.last_agent_status = last.status as "ok" | "cancelled" | "error";
     }
@@ -485,14 +576,20 @@ export function mockBackend(): Backend {
         input_tokens: turn.usage.input_tokens + input,
         output_tokens: turn.usage.output_tokens + output,
       };
-      turn.cost_usd = (turn.cost_usd ?? 0) + input * 0.000005 + output * 0.000025;
-      send(run, {
+      const c = recordCall(s, a, "step", "claude-opus-5", input, output);
+      turn.cost_usd = (turn.cost_usd ?? 0) + (c.cost_usd ?? 0);
+      const t = totalsOf(calls.filter((x) => x.session_id === s.info.id));
+      const ev: Record<string, unknown> = {
         type: "agent.usage",
         agent_id: a,
-        call_id: nextId("m"),
+        call_id: c.call_id,
         usage: { ...zero, input_tokens: input, output_tokens: output },
-        cost_usd: input * 0.000005 + output * 0.000025,
-      });
+        cost_usd: c.cost_usd,
+        session_usage: t.usage,
+        session_calls: t.calls,
+      };
+      if (t.cost !== undefined) ev.session_cost_usd = t.cost;
+      send(run, ev);
     };
 
     if (done === 0) send(run, { type: "agent.started", agent_id: a, session_id: s.info.id });
@@ -779,14 +876,78 @@ export function mockBackend(): Backend {
     if (run.cancelled) return finish("cancelled");
     push(s, "assistant", [{ type: "text", text: ANSWER }], a, "st3");
     finish("ok");
-    // The cheap model names the session a moment later.
+    // The cheap model names the session a moment later: a mentor call too.
     setTimeout(() => {
       if (s.info.title_source !== "user") {
         s.info.title = "Load the config once";
         s.info.title_source = "generated";
-        save();
+        for (const c of calls) if (c.session_id === s.info.id) c.session_title = s.info.title;
+        recordCall(s, a, "title", TITLE_MODEL, 80, 6);
       }
     }, 2000);
+  }
+
+  /**
+   * Ten days of history on a demo workspace (a fresh mock only), so the
+   * usage panel has something to chart: two sessions, a mix of models
+   * and kinds, one failed call and one on a model without a price.
+   */
+  function seedHistory() {
+    const ws = addWorkspace("C:/src/demo");
+    const day = (n: number, h: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() - n);
+      d.setHours(h, 4, 0, 0);
+      return d.toISOString();
+    };
+    const seedSession = (title: string, firstDay: number, prompt: string) => {
+      const s = createSession(ws.root);
+      s.info.title = title;
+      s.info.title_source = "generated";
+      s.info.created_at = day(firstDay, 9);
+      s.info.updated_at = s.info.created_at;
+      const a = nextId("a");
+      s.agents.push({
+        id: a,
+        status: "ok",
+        started_at: day(firstDay, 9),
+        ended_at: day(firstDay, 9),
+        model: "claude-opus-5",
+        calls: 0,
+        usage: zero,
+      });
+      push(s, "user", [{ type: "text", text: prompt }], a, undefined);
+      push(s, "assistant", [{ type: "text", text: `Done: ${title.toLowerCase()}.` }], a, "st1");
+      s.messages[0]!.created_at = day(firstDay, 9);
+      s.messages[1]!.created_at = day(firstDay, 9);
+      s.info.last_activity = day(firstDay, 9);
+      return { s, a };
+    };
+    const one = seedSession("Split the parser module", 9, "split the parser into a module");
+    const two = seedSession("Fix the flaky socket test", 4, "the socket test is flaky, fix it");
+    for (const n of [9, 8, 7, 6, 5, 3, 2, 1]) {
+      const { s, a } = n >= 5 ? one : two;
+      const model = n % 3 === 0 ? "claude-sonnet-5" : "claude-opus-5";
+      recordCall(s, a, "step", model, 3000 + n * 700, 200 + n * 40, {
+        started_at: day(n, 10),
+        cache_read: n * 1500,
+      });
+      recordCall(s, a, "step", model, 4200 + n * 300, 150 + n * 20, {
+        started_at: day(n, 11),
+        cache_read: n * 1800,
+        cache_creation: 400,
+      });
+    }
+    recordCall(one.s, one.a, "title", TITLE_MODEL, 80, 6, { started_at: day(9, 10) });
+    recordCall(two.s, two.a, "title", TITLE_MODEL, 90, 7, { started_at: day(4, 10) });
+    recordCall(two.s, two.a, "step", "claude-opus-5", 0, 0, {
+      started_at: day(2, 12),
+      status: "error",
+      total_ms: 12_030,
+    });
+    recordCall(two.s, two.a, "step", "claude-example-1", 1500, 90, { started_at: day(1, 12) });
+    calls.sort((x, y) => x.started_at.localeCompare(y.started_at));
+    save();
   }
 
   // What the last page left, and its runs carried on.
@@ -797,6 +958,7 @@ export function mockBackend(): Backend {
       ids = state.ids;
       for (const s of state.sessions) sessions.set(s.info.id, s);
       for (const e of state.trace) trace.set(e.event.id, e);
+      calls.push(...(state.calls ?? []));
       for (const w of state.workspaces ?? []) workspaces.set(w.id, w);
       config = state.config ?? {};
       workspaceConfig = state.workspaceConfig ?? {};
@@ -813,6 +975,101 @@ export function mockBackend(): Backend {
   } catch (e) {
     console.warn("mock: cannot restore", e);
   }
+  if (sessions.size === 0 && calls.length === 0) seedHistory();
+
+  /** The daemon's range bounds: an age (`7d`, `12h`), a bare local date, or RFC 3339. */
+  function bound(text: unknown, kind: "since" | "until"): string | undefined {
+    if (typeof text !== "string" || text.trim() === "") return undefined;
+    const age = /^(\d+)([mhdw])$/.exec(text.trim());
+    if (age !== null) {
+      const unit = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 }[age[2]!]!;
+      return new Date(Date.now() - Number(age[1]) * unit).toISOString();
+    }
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
+    if (date !== null) {
+      const d = new Date(Number(date[1]), Number(date[2]) - 1, Number(date[3]));
+      if (kind === "until") d.setDate(d.getDate() + 1);
+      return d.toISOString();
+    }
+    const d = new Date(text);
+    if (Number.isNaN(d.getTime())) {
+      throw rpcError(-32602, "invalid_params", `cannot parse ${kind} "${text}"`);
+    }
+    return d.toISOString();
+  }
+
+  /** The calls of a `stats.*` query, oldest first. */
+  function callsOf(params: Record<string, unknown>): {
+    rows: CallSummary[];
+    since?: string;
+    until?: string;
+  } {
+    const since = bound(params.since, "since");
+    const until = bound(params.until, "until");
+    const rows = calls.filter(
+      (c) =>
+        (params.session_id === undefined || c.session_id === params.session_id) &&
+        (params.workspace_id === undefined || c.workspace_id === params.workspace_id) &&
+        (since === undefined || c.started_at >= since) &&
+        (until === undefined || c.started_at < until),
+    );
+    const out: ReturnType<typeof callsOf> = { rows };
+    if (since !== undefined) out.since = since;
+    if (until !== undefined) out.until = until;
+    return out;
+  }
+
+  function bucket(
+    key: string | undefined,
+    label: string | undefined,
+    rows: CallSummary[],
+  ): TokenBucket {
+    const t = totalsOf(rows);
+    const b: TokenBucket = {
+      calls: t.calls,
+      input: t.usage.input_tokens,
+      output: t.usage.output_tokens,
+      cache_read: t.usage.cache_read_input_tokens,
+      cache_creation: t.usage.cache_creation_input_tokens,
+      cost_usd: rows.reduce((acc, c) => acc + (c.cost_usd ?? 0), 0),
+      unpriced_calls: t.unpriced,
+    };
+    if (key !== undefined) b.key = key;
+    if (label !== undefined) b.label = label;
+    return b;
+  }
+
+  /** Groups rows by `keyOf`, ordered by key or by cost (highest first). */
+  function grouped(
+    rows: CallSummary[],
+    keyOf: (c: CallSummary) => string,
+    labelOf: (c: CallSummary) => string | undefined,
+    byCost: boolean,
+  ): TokenBucket[] {
+    const groups = new Map<string, CallSummary[]>();
+    for (const c of rows) {
+      const k = keyOf(c);
+      groups.set(k, [...(groups.get(k) ?? []), c]);
+    }
+    const out = [...groups.entries()].map(([k, rs]) => bucket(k, labelOf(rs[0]!), rs));
+    out.sort((a, b) =>
+      byCost && a.cost_usd !== b.cost_usd
+        ? b.cost_usd - a.cost_usd
+        : (a.key ?? "").localeCompare(b.key ?? ""),
+    );
+    return out;
+  }
+
+  const localDay = (ts: string) => {
+    const d = new Date(ts);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+  const tz = () => {
+    const off = -new Date().getTimezoneOffset();
+    const p = (n: number) => String(Math.abs(n)).padStart(2, "0");
+    return `${off < 0 ? "-" : "+"}${p(Math.trunc(off / 60))}:${p(off % 60)}`;
+  };
 
   function call(method: string, params: Record<string, unknown>): unknown {
     const session = (id: unknown) => {
@@ -1021,7 +1278,7 @@ export function mockBackend(): Backend {
         return {
           format: "harness-session/1",
           exported_at: now(),
-          session: s.info,
+          session: summary(s),
           messages: s.messages,
           mentor_calls: [],
         };
@@ -1150,7 +1407,7 @@ export function mockBackend(): Backend {
           hasMore = from.length > limit;
         }
         const out: SessionGetResult = {
-          session: { ...s.info },
+          session: summary(s),
           messages: rows.map((m) => ({ ...m })),
           has_more: hasMore,
           agents: s.agents.map((a) => ({ ...a })),
@@ -1161,6 +1418,78 @@ export function mockBackend(): Backend {
         const run = runs.get(String(params.agent_id));
         if (run !== undefined) run.cancelled = true;
         return {};
+      }
+      case "stats.tokens": {
+        const q = callsOf(params);
+        const asked = Array.isArray(params.group_by) ? (params.group_by as StatsGroup[]) : [];
+        const groups = new Set<StatsGroup>(
+          asked.length === 0 ? ["model", "day", "session"] : asked,
+        );
+        const by = (g: StatsGroup, buckets: () => TokenBucket[]) =>
+          groups.has(g) ? buckets() : [];
+        return {
+          range: { since: q.since ?? null, until: q.until ?? null },
+          tz: tz(),
+          totals: bucket(undefined, undefined, q.rows),
+          by_model: by("model", () =>
+            grouped(
+              q.rows,
+              (c) => c.model,
+              () => undefined,
+              false,
+            ),
+          ),
+          by_day: by("day", () =>
+            grouped(
+              q.rows,
+              (c) => localDay(c.started_at),
+              () => undefined,
+              false,
+            ),
+          ),
+          by_session:
+            params.session_id === undefined
+              ? by("session", () =>
+                  grouped(
+                    q.rows,
+                    (c) => c.session_id,
+                    (c) => c.session_title,
+                    true,
+                  ),
+                )
+              : [],
+          by_workspace: by("workspace", () =>
+            grouped(
+              q.rows,
+              (c) => c.workspace_id ?? "",
+              (c) =>
+                c.workspace_id === undefined ? undefined : workspaces.get(c.workspace_id)?.root,
+              true,
+            ),
+          ),
+          by_kind: by("kind", () =>
+            grouped(
+              q.rows,
+              (c) => c.kind,
+              () => undefined,
+              false,
+            ),
+          ),
+          apprentice: {
+            invocations: 0,
+            bypassed: 0,
+            tokens_in: 0,
+            tokens_out: 0,
+            estimated_saved_input: 0,
+          },
+        };
+      }
+      case "stats.calls": {
+        const q = callsOf(params);
+        const limit = Math.min(1000, Math.max(1, Number(params.limit ?? 100)));
+        const offset = Number(params.offset ?? 0);
+        const newest = [...q.rows].reverse();
+        return { calls: newest.slice(offset, offset + limit), total: newest.length };
       }
       case "trace.list": {
         const kinds = Array.isArray(params.kinds) ? (params.kinds as string[]) : undefined;

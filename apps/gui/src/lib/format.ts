@@ -27,6 +27,21 @@ export function usd(v: number): string {
   return v !== 0 && Math.abs(v) < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
 }
 
+/** `182k`, `1.2M`, `950` — the session header's compact counts. */
+export function compactNum(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
+/** `in 182k · out 21k · cached 610k · $1.84 · 14 calls` (the session header). */
+export function sessionTotals(usage: Usage, costUsd: number | undefined, calls: number): string {
+  let line = `in ${compactNum(usage.input_tokens)} · out ${compactNum(usage.output_tokens)} · cached ${compactNum(usage.cache_read_input_tokens)}`;
+  if (costUsd !== undefined) line += ` · ${usd(costUsd)}`;
+  line += ` · ${calls} ${calls === 1 ? "call" : "calls"}`;
+  return line;
+}
+
 /** `1.2s`, `48s`, `3m 05s`. */
 export function duration(ms: number): string {
   const s = ms / 1000;

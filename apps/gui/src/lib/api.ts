@@ -72,6 +72,8 @@ export interface SessionSummary {
   usage: Usage;
   /** Cost of those calls; absent when one had no price. */
   cost_usd?: number;
+  /** Mentor calls of the session, every kind (title calls included). */
+  calls: number;
 }
 
 /** A session with its resume metadata (`session.get`, `session.export`). */
@@ -252,6 +254,10 @@ export interface ApprenticeStats {
   estimated_saved_input: number;
 }
 
+/** A breakdown `stats.tokens` can be asked for. */
+export type StatsGroup = "day" | "model" | "session" | "workspace" | "kind";
+
+/** Only the breakdowns asked for (`group_by`) are filled; the rest stay empty. */
 export interface TokenStats {
   range: StatsRange;
   tz: string;
@@ -259,7 +265,34 @@ export interface TokenStats {
   by_model: TokenBucket[];
   by_day: TokenBucket[];
   by_session: TokenBucket[];
+  by_workspace: TokenBucket[];
+  by_kind: TokenBucket[];
   apprentice: ApprenticeStats;
+}
+
+/** One mentor call as `stats.calls` lists it. */
+export interface CallSummary {
+  call_id: string;
+  started_at: string;
+  session_id: string;
+  session_title?: string;
+  workspace_id?: string;
+  agent_id: string;
+  /** `step` | `title`. */
+  kind: string;
+  model: string;
+  effort?: string;
+  status: "running" | "ok" | "cancelled" | "error";
+  stop_reason?: string;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  /** Absent while running, after a failure, or without a price. */
+  cost_usd?: number;
+  total_ms?: number;
+  /** The `mentor.request` event; its blob is the exact body sent. */
+  request_event_id: string;
 }
 
 // ---------------------------------------------------------------- methods
@@ -458,6 +491,26 @@ export interface StatsTokensParams {
   since?: string;
   until?: string;
   session_id?: string;
+  workspace_id?: string;
+  /** Empty = model, day and session. */
+  group_by?: StatsGroup[];
+}
+
+export interface StatsCallsParams {
+  since?: string;
+  until?: string;
+  session_id?: string;
+  workspace_id?: string;
+  /** Default 100, at most 1000. */
+  limit?: number;
+  offset?: number;
+}
+
+export interface StatsCallsResult {
+  /** Newest first. */
+  calls: CallSummary[];
+  /** Matching calls in all, for paging. */
+  total: number;
 }
 
 export interface StatsRepriceParams {
@@ -631,6 +684,7 @@ export interface Methods {
   "trace.list": { params: TraceListParams; result: TraceListResult };
   "trace.get": { params: TraceGetParams; result: TraceGetResult };
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
+  "stats.calls": { params: StatsCallsParams; result: StatsCallsResult };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
   "tools.list": { params: ToolsListParams; result: ToolsListResult };
   "tools.rules": { params: ToolsRulesParams; result: ToolsRulesResult };
@@ -676,6 +730,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "trace.list",
   "trace.get",
   "stats.tokens",
+  "stats.calls",
   "stats.reprice",
   "tools.list",
   "tools.rules",
@@ -737,6 +792,8 @@ export type KnownEvent =
       session_usage?: Usage;
       /** Running cost of the session; absent when a call was unpriced. */
       session_cost_usd?: number;
+      /** Mentor calls of the session so far, this one included. */
+      session_calls?: number;
     }
   /** `context_large`, `tools_changed`, `stream_interrupted`: worth showing, not fatal. */
   | { type: "agent.warning"; agent_id: string; kind: string; message: string }

@@ -50,6 +50,8 @@ pub struct Conversation {
     /// Running cost; `None` once a call was unpriced.
     cost_micros: Option<i64>,
     priced: bool,
+    /// Mentor calls of the session so far (every kind).
+    calls: u64,
 }
 
 impl Conversation {
@@ -71,6 +73,7 @@ impl Conversation {
             totals: Usage::default(),
             cost_micros: Some(0),
             priced: true,
+            calls: 0,
         }
     }
 
@@ -166,16 +169,18 @@ impl Conversation {
 
     /// Seeds the running totals (a resumed session starts from what
     /// the store has).
-    pub fn seed_totals(&mut self, totals: Usage, cost_micros: Option<i64>) {
+    pub fn seed_totals(&mut self, totals: Usage, cost_micros: Option<i64>, calls: u64) {
         self.totals = totals;
         self.priced = cost_micros.is_some();
         self.cost_micros = cost_micros;
+        self.calls = calls;
     }
 
     /// Adds a completed call to the totals and remembers it as the
     /// last one.
     pub fn record_usage(&mut self, usage: Usage, cost_micros: Option<i64>) {
         self.last_usage = Some(usage);
+        self.calls += 1;
         self.totals.input_tokens += usage.input_tokens;
         self.totals.output_tokens += usage.output_tokens;
         self.totals.cache_read_input_tokens += usage.cache_read_input_tokens;
@@ -202,6 +207,11 @@ impl Conversation {
 
     pub fn totals(&self) -> Usage {
         self.totals
+    }
+
+    /// Mentor calls of the session so far, the seeded ones included.
+    pub fn calls(&self) -> u64 {
+        self.calls
     }
 
     /// Running cost of the session in USD × 1e6; `None` when a call
@@ -582,6 +592,7 @@ mod tests {
         c.record_usage(u, Some(1_000));
         assert_eq!(c.context_tokens(), Some(550));
         assert_eq!(c.cost_micros(), Some(1_000));
+        assert_eq!(c.calls(), 1);
         c.record_usage(u, Some(500));
         assert_eq!(c.totals().input_tokens, 200);
         assert_eq!(c.cost_micros(), Some(1_500));
@@ -592,9 +603,10 @@ mod tests {
         assert_eq!(c.describe(), "0 messages, 2 tools, 0k context");
 
         let mut d = conv();
-        d.seed_totals(u, None);
+        d.seed_totals(u, None, 3);
         d.record_usage(u, Some(1));
         assert_eq!(d.cost_micros(), None);
         assert_eq!(d.totals().output_tokens, 20);
+        assert_eq!(d.calls(), 4);
     }
 }

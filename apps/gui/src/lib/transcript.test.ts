@@ -30,6 +30,7 @@ const info: SessionInfo = {
   created_at: "2026-09-12T10:00:00.000Z",
   updated_at: "2026-09-12T10:00:00.000Z",
   message_count: 0,
+  calls: 0,
   last_activity: "2026-09-12T10:00:00.000Z",
   usage: {
     input_tokens: 0,
@@ -291,11 +292,23 @@ describe("the live run", () => {
         cache_creation_input_tokens: 0,
       },
       cost_usd: 0.002,
+      session_usage: {
+        input_tokens: 110,
+        output_tokens: 25,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      },
+      session_cost_usd: 0.0138,
+      session_calls: 3,
     });
     expect(t.calls.c2?.eventId).toBe("ev9");
     expect(t.calls.c2?.status).toBe("ok");
     expect(t.agents.a2?.usage.input_tokens).toBe(100);
     expect(t.agents.a2?.calls).toBe(1);
+    // The header's session totals come from the event, not a refetch.
+    expect(t.info?.usage.input_tokens).toBe(110);
+    expect(t.info?.cost_usd).toBe(0.0138);
+    expect(t.info?.calls).toBe(3);
 
     // Step 2 begins: the run refreshes and the stored rows of step 1 arrive.
     send({ type: "agent.step", agent_id: "a2", seq: 2, phase: "mentor" });
