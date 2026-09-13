@@ -105,3 +105,23 @@ export interface AppInfo {
 export function appInfo(): Promise<AppInfo> {
   return bridge<AppInfo>("app_info", {});
 }
+
+/** Opens a file or folder with the OS default (the editor for a rules file). */
+export function openPath(path: string): Promise<void> {
+  return bridge<void>("open_path", { path });
+}
+
+/** Writes a text file where the user chose to save (an export). */
+export function writeTextFile(path: string, contents: string): Promise<void> {
+  return bridge<void>("write_text_file", { path, contents });
+}
+
+/** Bytes under a directory (the data dir's size in Settings). */
+export function dirSize(path: string): Promise<number> {
+  return bridge<number>("dir_size", { path });
+}
+
+/** Stops the daemon and quits the app (the tray's "Quit and stop the daemon"). */
+export function quitAndStopDaemon(): Promise<void> {
+  return bridge<void>("quit_and_stop_daemon", {});
+}

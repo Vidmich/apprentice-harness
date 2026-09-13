@@ -466,6 +466,7 @@ mod tests {
                 "tools.allow",
                 "tools.deny",
                 "tools.list",
+                "tools.remove",
                 "tools.rules",
                 "trace.get",
                 "trace.list",

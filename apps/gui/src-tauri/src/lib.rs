@@ -8,6 +8,7 @@
 
 pub mod bridge;
 pub mod daemon;
+pub mod host;
 
 use apprentice_client::ConnectOptions;
 use apprentice_common::paths::Paths;
@@ -76,9 +77,16 @@ pub fn run() {
             daemon::daemon_restart,
             bridge::rpc_call,
             bridge::rpc_stream,
+            host::open_path,
+            host::write_text_file,
+            host::dir_size,
+            host::quit_and_stop_daemon,
         ])
         .setup(|app| {
             daemon::spawn_manager(app.handle().clone());
+            if let Err(e) = host::build_tray(app.handle()) {
+                eprintln!("warning: no tray icon: {e}");
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,19 +1,28 @@
 // App state (Zustand): daemon connection, auth, the model in use, the
-// chats (one per session) and the composer settings. Nothing here talks
-// to the daemon — `lib/bootstrap.ts` and `lib/chat.ts` do and write the
-// results in. The chats and settings survive a reload (localStorage) so
-// a running session is found again.
+// workspaces and which is selected, the chats (one per session) and
+// the composer settings. Nothing here talks to the daemon —
+// `lib/bootstrap.ts`, `lib/chat.ts` and `lib/sessions.ts` do and write
+// the results in. The chats, the selected workspace and the settings
+// survive a reload (localStorage) so the app comes back where it was.
 
 import { create } from "zustand";
-import type { AuthStatusResult, ThinkingDisplay } from "./lib/api";
+import type {
+  AuthStatusResult,
+  ThinkingDisplay,
+  WorkspaceInfoResult,
+  WorkspaceSummary,
+} from "./lib/api";
 import type { AppInfo, DaemonStatus } from "./lib/rpc";
 
 /** What sends the composer: `Enter` (Shift+Enter breaks the line) or `Ctrl+Enter`. */
 export type SendKey = "enter" | "ctrl_enter";
 
+/** What the main pane shows. */
+export type View = "chat" | "settings";
+
 export interface Chat {
   id: number;
-  /** Set once the first prompt created the session. */
+  /** Set once the first prompt created the session (or the chat opened one). */
   sessionId?: string;
   /** Folder for the session; empty = none chosen yet. */
   workspace: string;
@@ -28,11 +37,16 @@ export interface ChatPatch {
   error?: string | undefined;
 }
 
+/** Chats kept open beyond the active one (idle ones past this are closed). */
+export const MAX_CHATS = 8;
+
 interface Persisted {
   chats: Chat[];
   activeChat: number;
   nextChatId: number;
   sendKey: SendKey;
+  /** Workspace id the sidebar shows; `null` = all workspaces. */
+  selectedWorkspace: string | null;
 }
 
 export interface AppState extends Persisted {
@@ -44,13 +58,28 @@ export interface AppState extends Persisted {
   model: string | undefined;
   /** `mentor.thinking_display` from config; thinking is shown until known otherwise. */
   thinkingDisplay: ThinkingDisplay;
+  view: View;
+  /** `workspace.list`, most recently used first. */
+  workspaces: WorkspaceSummary[];
+  /** `workspace.info` by id, for the ones looked at. */
+  workspaceInfo: Record<string, WorkspaceInfoResult>;
 
   setApp(app: AppInfo): void;
   setDaemon(status: DaemonStatus): void;
   setAuth(auth: AuthStatusResult | undefined): void;
   setModel(model: string | undefined): void;
   setThinkingDisplay(display: ThinkingDisplay): void;
-  addChat(): number;
+  setView(view: View): void;
+  setWorkspaces(workspaces: WorkspaceSummary[]): void;
+  setWorkspaceInfo(info: WorkspaceInfoResult): void;
+  selectWorkspace(id: string | null): void;
+  /** A fresh chat on `workspace` (the selected one's root by default). */
+  addChat(workspace?: string): number;
+  /**
+   * Shows the chat of a session, opening one when none is. Idle chats
+   * beyond `MAX_CHATS` go; `busy` says which must stay.
+   */
+  openChat(sessionId: string, workspace: string, busy: (sessionId: string) => boolean): number;
   closeChat(id: number): void;
   selectChat(id: number): void;
   updateChat(id: number, patch: ChatPatch): void;
@@ -59,12 +88,18 @@ export interface AppState extends Persisted {
 
 const STORAGE_KEY = "harness.chats";
 
-function newChat(id: number): Chat {
-  return { id, workspace: "" };
+function newChat(id: number, workspace = ""): Chat {
+  return { id, workspace };
 }
 
 function defaults(): Persisted {
-  return { chats: [newChat(1)], activeChat: 1, nextChatId: 2, sendKey: "enter" };
+  return {
+    chats: [newChat(1)],
+    activeChat: 1,
+    nextChatId: 2,
+    sendKey: "enter",
+    selectedWorkspace: null,
+  };
 }
 
 /** What the last session left in localStorage, or the defaults. */
@@ -95,6 +130,7 @@ function restore(): Persisted {
       activeChat,
       nextChatId,
       sendKey: v.sendKey === "ctrl_enter" ? "ctrl_enter" : "enter",
+      selectedWorkspace: typeof v.selectedWorkspace === "string" ? v.selectedWorkspace : null,
     };
   } catch {
     return defaults();
@@ -113,6 +149,7 @@ function persist(s: Persisted): void {
         activeChat: s.activeChat,
         nextChatId: s.nextChatId,
         sendKey: s.sendKey,
+        selectedWorkspace: s.selectedWorkspace,
       }),
     );
   } catch {
@@ -127,15 +164,67 @@ export const useStore = create<AppState>((set, get) => ({
   auth: undefined,
   model: undefined,
   thinkingDisplay: "summarized",
+  view: "chat",
+  workspaces: [],
+  workspaceInfo: {},
 
   setApp: (app) => set({ app }),
   setDaemon: (daemon) => set({ daemon }),
   setAuth: (auth) => set({ auth }),
   setModel: (model) => set({ model }),
   setThinkingDisplay: (thinkingDisplay) => set({ thinkingDisplay }),
-  addChat: () => {
-    const id = get().nextChatId;
-    set((s) => ({ chats: [...s.chats, newChat(id)], activeChat: id, nextChatId: id + 1 }));
+  setView: (view) => set({ view }),
+  setWorkspaces: (workspaces) =>
+    set((s) => ({
+      workspaces,
+      // A forgotten workspace cannot stay selected.
+      selectedWorkspace:
+        s.selectedWorkspace !== null && !workspaces.some((w) => w.id === s.selectedWorkspace)
+          ? null
+          : s.selectedWorkspace,
+    })),
+  setWorkspaceInfo: (info) =>
+    set((s) => ({ workspaceInfo: { ...s.workspaceInfo, [info.id]: info } })),
+  selectWorkspace: (selectedWorkspace) => set({ selectedWorkspace }),
+  addChat: (workspace) => {
+    const s = get();
+    const root = workspace ?? s.workspaces.find((w) => w.id === s.selectedWorkspace)?.root ?? "";
+    // One empty draft per workspace is enough.
+    const draft = s.chats.find((c) => c.sessionId === undefined && c.workspace === root);
+    if (draft !== undefined) {
+      set({ activeChat: draft.id, view: "chat" });
+      return draft.id;
+    }
+    const id = s.nextChatId;
+    set({
+      chats: [...s.chats, newChat(id, root)],
+      activeChat: id,
+      nextChatId: id + 1,
+      view: "chat",
+    });
+    return id;
+  },
+  openChat: (sessionId, workspace, busy) => {
+    const s = get();
+    const existing = s.chats.find((c) => c.sessionId === sessionId);
+    if (existing !== undefined) {
+      set({ activeChat: existing.id, view: "chat" });
+      return existing.id;
+    }
+    const id = s.nextChatId;
+    const chat: Chat = { id, sessionId, workspace };
+    // Oldest idle chats go first; drafts with text typed are the
+    // composer's business, so only session chats are closed.
+    const keep: Chat[] = [];
+    let extra = s.chats.filter((c) => c.sessionId !== undefined).length + 1 - MAX_CHATS;
+    for (const c of s.chats) {
+      if (extra > 0 && c.sessionId !== undefined && !busy(c.sessionId)) {
+        extra -= 1;
+        continue;
+      }
+      keep.push(c);
+    }
+    set({ chats: [...keep, chat], activeChat: id, nextChatId: id + 1, view: "chat" });
     return id;
   },
   closeChat: (id) =>
@@ -149,7 +238,7 @@ export const useStore = create<AppState>((set, get) => ({
         s.activeChat === id ? (chats[chats.length - 1]?.id ?? s.activeChat) : s.activeChat;
       return { chats, activeChat };
     }),
-  selectChat: (id) => set({ activeChat: id }),
+  selectChat: (id) => set({ activeChat: id, view: "chat" }),
   updateChat: (id, patch) =>
     set((s) => ({
       chats: s.chats.map((c) => {
@@ -172,7 +261,8 @@ useStore.subscribe((s, prev) => {
     s.chats !== prev.chats ||
     s.activeChat !== prev.activeChat ||
     s.nextChatId !== prev.nextChatId ||
-    s.sendKey !== prev.sendKey
+    s.sendKey !== prev.sendKey ||
+    s.selectedWorkspace !== prev.selectedWorkspace
   ) {
     persist(s);
   }
@@ -180,6 +270,18 @@ useStore.subscribe((s, prev) => {
 
 export function chatOf(id: number): Chat | undefined {
   return useStore.getState().chats.find((c) => c.id === id);
+}
+
+/** The chat showing `sessionId`, if one is open. */
+export function chatOfSession(sessionId: string): Chat | undefined {
+  return useStore.getState().chats.find((c) => c.sessionId === sessionId);
+}
+
+/** The selected workspace's row, if one is selected. */
+export function selectedWorkspace(s: AppState): WorkspaceSummary | undefined {
+  return s.selectedWorkspace === null
+    ? undefined
+    : s.workspaces.find((w) => w.id === s.selectedWorkspace);
 }
 
 /** Whether the mentor provider has a key (undefined while unknown). */

@@ -420,6 +420,54 @@ pub fn append_rule(path: &Path, rule: &RuleSpec, comment: &str) -> Result<u64, R
     Ok(line)
 }
 
+/// Removes the `index`-th `[[rule]]` (1-based, the order `tools.rules`
+/// lists) from `path`, comments above it included, and returns it. The
+/// rest of the file is untouched.
+///
+/// # Errors
+/// No such rule, a file that does not parse, or I/O.
+pub fn remove_rule(path: &Path, index: usize) -> Result<RuleSpec, RuleFileError> {
+    let io = |source| RuleFileError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    let text = std::fs::read_to_string(path).map_err(io)?;
+    let (_, rules) = parse_rules(path, &text)?;
+    let rule = index
+        .checked_sub(1)
+        .and_then(|i| rules.get(i))
+        .ok_or_else(|| RuleFileError::Parse {
+            path: path.to_path_buf(),
+            line: 0,
+            message: format!("no rule {index}: the file has {}", rules.len()),
+        })?
+        .spec
+        .clone();
+    let mut doc: toml_edit::DocumentMut =
+        text.parse()
+            .map_err(|e: toml_edit::TomlError| RuleFileError::Parse {
+                path: path.to_path_buf(),
+                line: e.span().map_or(1, |s| line_of(&text, s.start)),
+                message: e.message().to_owned(),
+            })?;
+    let tables = doc
+        .get_mut("rule")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+        .ok_or_else(|| RuleFileError::Parse {
+            path: path.to_path_buf(),
+            line: 1,
+            message: "`rule` is not an array of tables".to_owned(),
+        })?;
+    tables.remove(index - 1);
+    if tables.is_empty() {
+        doc.remove("rule");
+    }
+    let text = doc.to_string();
+    parse_rules(path, &text)?;
+    write_atomic(path, text.as_bytes()).map_err(io)?;
+    Ok(rule)
+}
+
 pub(super) fn effect_name(effect: RuleEffect) -> &'static str {
     match effect {
         RuleEffect::Allow => "allow",

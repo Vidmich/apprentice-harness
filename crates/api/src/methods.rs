@@ -553,6 +553,32 @@ pub struct ToolsRuleResult {
 method!(ToolsAllow, "tools.allow", ToolsRuleParams, ToolsRuleResult);
 method!(ToolsDeny, "tools.deny", ToolsRuleParams, ToolsRuleResult);
 
+/// `tools.remove`: deletes one `[[rule]]` from a rules file, named the
+/// way `tools.rules` lists it (`index`, 1-based within its file).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsRemoveParams {
+    pub layer: ConfigLayer,
+    /// Required for the workspace layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsRemoveResult {
+    /// The file written.
+    pub path: String,
+    /// The rule that went.
+    pub rule: RuleSpec,
+}
+
+method!(
+    ToolsRemove,
+    "tools.remove",
+    ToolsRemoveParams,
+    ToolsRemoveResult
+);
+
 // ---------------------------------------------------------------- prompt.*
 
 /// `prompt.show`: the assembled system prompt (task M01-09) of a
@@ -696,6 +722,10 @@ pub struct WorkspaceInfoResult {
     /// Checked-out branch, when `HEAD` is symbolic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
+    /// The work tree has staged, unstaged or untracked changes; absent
+    /// when the root is not a work tree or `git` could not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_dirty: Option<bool>,
     /// `.harness/HARNESS.md` exists.
     pub has_instructions: bool,
     /// `.harness/config.toml` exists.
@@ -749,6 +779,7 @@ pub const ALL_METHODS: &[&str] = &[
     ToolsRules::NAME,
     ToolsAllow::NAME,
     ToolsDeny::NAME,
+    ToolsRemove::NAME,
     PromptShow::NAME,
     PermissionRespond::NAME,
     WorkspaceAdd::NAME,

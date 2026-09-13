@@ -14,7 +14,7 @@ use apprentice_core::tools::{
 use apprentice_core::trace::{
     BlobId, NewAgent, NewSession, StepRef, TraceStore, TraceWriter, kinds,
 };
-use apprentice_core::workspace::{SnapshotPhase, Workspace};
+use apprentice_core::workspace::{SnapshotPhase, Workspace, git_dirty};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -50,6 +50,10 @@ async fn an_agent_run_records_two_snapshots_and_a_files_changed_outcome() {
         let args: Vec<&str> = args.iter().copied().filter(|a| !a.is_empty()).collect();
         assert!(git(root, &args), "git {args:?}");
     }
+
+    // The switcher's marker (task M01-12) sees the same thing the
+    // snapshot will.
+    assert_eq!(git_dirty(root).await, Some(false));
 
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::from_home(home.path());
@@ -115,6 +119,11 @@ async fn an_agent_run_records_two_snapshots_and_a_files_changed_outcome() {
 
     // snapshot(end) → outcome → agent.finished
     let end = workspace.snapshot().await;
+    assert_eq!(
+        git_dirty(root).await,
+        Some(true),
+        "an untracked file counts"
+    );
     store
         .append(end.event(session.clone(), Some(agent.clone()), SnapshotPhase::End))
         .unwrap();

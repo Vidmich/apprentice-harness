@@ -42,6 +42,28 @@ pub fn git_head(root: &Path) -> Option<GitHead> {
     })
 }
 
+/// Longest `git status` output [`git_dirty`] reads before giving up.
+const DIRTY_STATUS_MAX: usize = 8 * 1024 * 1024;
+
+/// Whether the work tree at `root` has changes: staged, unstaged,
+/// unmerged or untracked paths under the root (task M01-12, the
+/// workspace switcher's marker). `None` when `root` is not a work tree
+/// or `git` is missing, fails or takes too long.
+pub async fn git_dirty(root: &Path) -> Option<bool> {
+    git_head(root)?;
+    let repo = Repo::open(root).await.ok()?;
+    let out = repo
+        .run(
+            &["status", "--porcelain=v2", "-z", "--untracked-files=normal"],
+            DIRTY_STATUS_MAX,
+        )
+        .await
+        .ok()?;
+    let mut status = parse_status(&out.stdout);
+    status.restrict(repo.prefix());
+    Some(!status.is_clean())
+}
+
 /// `<root>/.git` as a directory, or the directory a `.git` file names.
 fn git_dir(root: &Path) -> Option<PathBuf> {
     let dot_git = root.join(".git");

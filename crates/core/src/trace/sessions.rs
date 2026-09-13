@@ -772,6 +772,7 @@ fn session_info(r: &Row<'_>) -> rusqlite::Result<SessionInfo> {
             message_count: get_u64(r, 7)?,
             last_activity: r.get(8)?,
             last_agent_status,
+            running_agent: None,
             usage: Usage {
                 input_tokens: get_u64(r, 10)?,
                 output_tokens: get_u64(r, 11)?,

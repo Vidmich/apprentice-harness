@@ -30,15 +30,18 @@ spawned included; the restarted app spawns a fresh one.
 
 `pnpm dev` alone serves the page to a plain browser at
 `http://localhost:1420`. Outside Tauri the page talks to the scripted
-mock daemon in `src/lib/mock.ts` instead of `harnessd`: sessions,
-`agent.run` with a canned streamed answer (thinking, markdown, a read,
-an edit with a diff, a shell with streamed output), cancel, reattach
-after a reload, and the trace events behind the Raw tab. Words in the
-prompt steer it: `fail` (an error before any tool, for Retry), `slow`
-(a minute-long shell, for Cancel and reload), `big` (5 MB of shell
-output), `warn` (a warning in the footer). It costs no tokens and is
-where the chat view's rendering is worked on; the real daemon is only
-reachable from the app. `TESTING.md` is the manual checklist for both.
+mock daemon in `src/lib/mock.ts` instead of `harnessd`: workspaces,
+sessions (list, search, rename, archive, delete, export), `agent.run`
+with a canned streamed answer (thinking, markdown, a read, an edit with
+a diff, a shell with streamed output), cancel, reattach after a reload,
+the trace events behind the Raw tab, the config keys the settings
+screen shows and the permission rules. Words in the prompt steer it:
+`fail` (an error before any tool, for Retry), `slow` (a minute-long
+shell, for Cancel and reload), `big` (5 MB of shell output), `warn` (a
+warning in the footer), `ask` (the edit asks for permission unless a
+rule decides). It costs no tokens and is where the views are worked on;
+the real daemon is only reachable from the app. `TESTING.md` is the
+manual checklist for both.
 
 ## How it is wired
 
@@ -55,6 +58,12 @@ reachable from the app. `TESTING.md` is the manual checklist for both.
   A connection that drops mid-stream produces a synthetic
   `agent.finished{status: error, kind: daemon_unavailable}`.
 - `daemon_restart` asks the daemon to stop; the manager respawns it.
+- `src-tauri/src/host.rs` — what the app does on the host besides the
+  daemon: `open_path` (a rules file in the editor, the data folder),
+  `write_text_file` (an export where the save dialog pointed),
+  `dir_size`, `quit_and_stop_daemon`, and the tray icon ("Show", "Quit
+  (daemon keeps running)", "Quit and stop the daemon"). Closing the
+  window alone leaves the daemon running: it was spawned detached.
 - `src/lib/api.ts` — hand-written types mirroring `crates/api`. `api.test.ts`
   parses the Rust snapshot JSON (`crates/api/tests/snapshots`) against
   them, so a wire change on the Rust side fails the GUI tests.
@@ -71,10 +80,26 @@ reachable from the app. `TESTING.md` is the manual checklist for both.
   next step boundary), refresh at step boundaries, and the raw output of
   a tool call from the trace (`trace.list` + `trace.get`). Events are
   folded in batches so a fast stream costs one render per frame.
-- `src/store.ts` (app state, the chats — persisted in `localStorage` so a
-  reload finds its sessions — and the composer settings),
-  `src/stores/transcripts.ts` (one transcript per session, the five most
-  recent kept).
+- `src/lib/sessions.ts` — the sidebar's effects: the workspaces
+  (`workspace.list/add/remove/info`), the sessions of the selected one
+  (`session.list`, again every 30 s), the search (`session.search`),
+  open/rename/archive/delete/export. `src/lib/permissions.ts` — the
+  permission requests waiting for an answer, routed by session (pure,
+  `permissions.test.ts`); `respondPermission` in `chat.ts` answers.
+  `src/lib/settings.ts` — the config keys the settings screen shows and
+  their reads/writes (`config.get` per key for the source, `config.set`
+  to a layer).
+- `src/store.ts` (app state, the workspaces and the selected one, the
+  chats — persisted in `localStorage` so a reload finds its sessions —
+  and the composer settings), `src/stores/transcripts.ts` (one
+  transcript per session, the five most recent kept),
+  `src/stores/sessions.ts` (the list and the search hits),
+  `src/stores/permissions.ts` (the open requests).
+- `src/components/sidebar/` — `WorkspaceSwitcher` (branch and dirty
+  marker), `SessionList` (Today / Yesterday / Earlier, the search, the
+  drafts), `SessionRow` (status dot, cost, the row menu).
+  `PermissionDialog` and `Toasts` sit over the chat; `settings/` is the
+  settings screen (`SettingField`, `RulesEditor`).
 - `src/components/chat/` — `TranscriptView` (sticks to the bottom,
   virtualises above 200 items), `Markdown` + `CodeBlock` (react-markdown,
   Shiki loaded on first use, both themes as CSS variables), `ToolCard`

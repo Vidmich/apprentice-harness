@@ -1,9 +1,12 @@
 // Wires the backend to the store: app info once, the daemon connection
-// state as it changes, and auth/model whenever the daemon (re)connects.
+// state as it changes, and auth/model/workspaces/sessions whenever the
+// daemon (re)connects (the list again every `LIST_REFRESH_MS` while the
+// window is shown, for runs started elsewhere).
 
 import { useStore } from "../store";
 import { onDaemonStatus } from "./events";
 import { RpcFailure, appInfo, call, daemonStatus } from "./rpc";
+import { LIST_REFRESH_MS, refreshSessions, refreshWorkspaces } from "./sessions";
 
 /** Re-reads what the status bar and Setup screen show. */
 export async function refreshDaemonFacts(): Promise<void> {
@@ -27,6 +30,8 @@ export async function refreshDaemonFacts(): Promise<void> {
   } catch (e) {
     console.warn("config.get failed:", e instanceof RpcFailure ? e.message : e);
   }
+  await refreshWorkspaces();
+  await refreshSessions();
 }
 
 /** Called once from `main.tsx`. Returns a function that stops listening. */
@@ -51,5 +56,11 @@ export async function bootstrap(): Promise<() => void> {
   } catch (e) {
     console.warn("daemon_status failed:", e);
   }
-  return stop;
+  const timer = setInterval(() => {
+    if (document.visibilityState === "visible") void refreshSessions();
+  }, LIST_REFRESH_MS);
+  return () => {
+    clearInterval(timer);
+    stop();
+  };
 }

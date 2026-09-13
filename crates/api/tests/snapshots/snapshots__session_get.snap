@@ -20,6 +20,7 @@ expression: "(SessionGetParams\n{ id: \"s1\".into(), after_seq: None, before_seq
       "message_count": 7,
       "last_activity": "2026-09-12T10:04:30.000Z",
       "last_agent_status": "ok",
+      "running_agent": "a2",
       "usage": {
         "input_tokens": 1204,
         "output_tokens": 310,

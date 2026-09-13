@@ -248,6 +248,7 @@ fn session_shapes() {
         message_count: 7,
         last_activity: "2026-09-12T10:04:30.000Z".into(),
         last_agent_status: Some(AgentStatus::Ok),
+        running_agent: Some("a2".into()),
         usage,
         cost_usd: Some(0.0138),
     };
@@ -537,6 +538,7 @@ fn workspace_shapes() {
             index_age_s: 3,
             git_head: Some("0123456789abcdef0123456789abcdef01234567".into()),
             git_branch: Some("main".into()),
+            git_dirty: Some(true),
             has_instructions: true,
             has_config: false,
             has_ignore_file: true,

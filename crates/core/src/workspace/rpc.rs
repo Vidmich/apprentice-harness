@@ -100,6 +100,7 @@ impl WorkspaceService {
         .map_err(|e| RpcError::internal(format!("index build failed: {e}")))?;
         let overrides = overrides?;
         let head = ws.git_head();
+        let git_dirty = super::git_dirty(ws.root()).await;
         Ok(WorkspaceInfoResult {
             id: record.id.to_string(),
             root: record.root,
@@ -111,6 +112,7 @@ impl WorkspaceService {
             index_age_s: index.age().as_secs(),
             git_head: head.as_ref().and_then(|h| h.commit.clone()),
             git_branch: head.and_then(|h| h.branch),
+            git_dirty,
             has_instructions: ws.has_instructions(),
             has_config: ws.config_file().is_file(),
             has_ignore_file: ws.ignore_file().is_file(),

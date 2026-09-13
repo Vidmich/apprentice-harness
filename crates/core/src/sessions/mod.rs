@@ -92,8 +92,21 @@ pub async fn list(
         offset: p.offset.unwrap_or(0),
     };
     let store = Arc::clone(state.store());
-    let sessions = blocking(move || Ok(store.list_sessions(&q)?)).await?;
+    let mut sessions = blocking(move || Ok(store.list_sessions(&q)?)).await?;
+    for s in &mut sessions {
+        s.running_agent = running_agent(state, &s.id);
+    }
     Ok(SessionListResult { sessions })
+}
+
+/// The agent this daemon is running on `session`, for the list and
+/// the session header.
+fn running_agent(state: &AppState, session: &str) -> Option<String> {
+    state
+        .agents()
+        .running_on(&SessionId::from(session))
+        .filter(crate::runtime::AgentHandle::is_running)
+        .map(|h| h.agent_id.to_string())
 }
 
 /// `session.get`: the session and a page of its messages.
@@ -109,8 +122,10 @@ pub async fn get(
     let limit = p.limit.unwrap_or(DEFAULT_PAGE).max(1);
     let after = p.after_seq.unwrap_or(0);
     let before = p.before_seq;
+    let running = running_agent(state, &p.id);
     blocking(move || {
-        let session = store.session_info(&id)?;
+        let mut session = store.session_info(&id)?;
+        session.summary.running_agent = running;
         // One past the page tells whether more follow (or precede).
         let mut rows = match before {
             Some(before) => store.session_messages_before(&id, before, limit + 1)?,

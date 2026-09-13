@@ -1,12 +1,13 @@
-//! `harness tools list` (task M01-01) and `tools rules|allow|deny` (task
-//! M01-07): the permission rules in force and how to add one.
+//! `harness tools list` (task M01-01) and `tools rules|allow|deny|remove`
+//! (tasks M01-07, M01-12): the permission rules in force and how to add
+//! or drop one.
 
 use std::path::PathBuf;
 
 use apprentice_api::events::Risk;
 use apprentice_api::methods::{
-    ToolsAllow, ToolsDeny, ToolsList, ToolsListParams, ToolsRuleParams, ToolsRuleResult,
-    ToolsRules, ToolsRulesParams,
+    ToolsAllow, ToolsDeny, ToolsList, ToolsListParams, ToolsRemove, ToolsRemoveParams,
+    ToolsRuleParams, ToolsRuleResult, ToolsRules, ToolsRulesParams,
 };
 use apprentice_api::types::{ConfigLayer, RuleEffect, RuleMatch, RuleSource, RuleSpec};
 use clap::{Args, Subcommand, ValueEnum};
@@ -27,6 +28,22 @@ pub enum ToolsCommand {
     Allow(RuleArgs),
     /// Add a deny rule to a permissions file.
     Deny(RuleArgs),
+    /// Remove a rule from a permissions file, by the index `tools rules`
+    /// shows (`workspace:2` is `remove 2`, `user:1` is `remove 1 --user`).
+    Remove(RemoveArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct RemoveArgs {
+    /// The rule's 1-based position in its file.
+    index: usize,
+    /// The workspace whose `.harness/permissions.toml` to edit (default:
+    /// the current directory).
+    #[arg(long, value_name = "DIR", conflicts_with = "user")]
+    workspace: Option<PathBuf>,
+    /// Edit the user's `permissions.toml` instead.
+    #[arg(long)]
+    user: bool,
 }
 
 #[derive(Debug, Args)]
@@ -142,6 +159,7 @@ pub fn run(ctx: &Ctx, cmd: &ToolsCommand) -> anyhow::Result<()> {
         ToolsCommand::Rules(a) => rules(ctx, a),
         ToolsCommand::Allow(a) => add_rule(ctx, a, RuleEffect::Allow),
         ToolsCommand::Deny(a) => add_rule(ctx, a, RuleEffect::Deny),
+        ToolsCommand::Remove(a) => remove_rule(ctx, a),
     }
 }
 
@@ -255,6 +273,30 @@ fn add_rule(ctx: &Ctx, a: &RuleArgs, effect: RuleEffect) -> anyhow::Result<()> {
         r.line,
         describe_rule(&r.rule)
     ));
+    Ok(())
+}
+
+fn remove_rule(ctx: &Ctx, a: &RemoveArgs) -> anyhow::Result<()> {
+    let (layer, workspace) = if a.user {
+        (ConfigLayer::User, None)
+    } else {
+        let dir = a.workspace.clone().unwrap_or_else(|| PathBuf::from("."));
+        (ConfigLayer::Workspace, Some(workspace_string(&dir)?))
+    };
+    let params = ToolsRemoveParams {
+        layer,
+        workspace,
+        index: a.index,
+    };
+    let r = with_client(
+        ctx,
+        |c| async move { Ok(c.call::<ToolsRemove>(params).await?) },
+    )?;
+    if ctx.out.json {
+        return ctx.out.emit_json(&r);
+    }
+    ctx.out
+        .line(format!("{}: removed {}", r.path, describe_rule(&r.rule)));
     Ok(())
 }
 

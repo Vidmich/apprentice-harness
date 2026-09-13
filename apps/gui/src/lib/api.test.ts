@@ -139,6 +139,7 @@ describe("api.ts against the Rust snapshots", () => {
     expect(list.sessions[0]?.status).toBe("open");
     expect(list.sessions[0]?.message_count).toBe(7);
     expect(list.sessions[0]?.last_agent_status).toBe("ok");
+    expect(list.sessions[0]?.running_agent).toBe("a2");
     expect(list.sessions[0]?.cost_usd).toBe(0.0138);
     const [, got] = snapshot("session_get") as [SessionGetParams, SessionGetResult];
     expect(got.session.prompt_version).toBe("mentor_system_v1");
@@ -155,6 +156,7 @@ describe("api.ts against the Rust snapshots", () => {
     const info = snapshot("workspace_info") as WorkspaceInfoResult;
     expect(info.file_count).toBe(1234);
     expect(info.git_branch).toBe("main");
+    expect(info.git_dirty).toBe(true);
     expect(info.index_truncated).toBeUndefined();
     expect(info.config_overrides).toEqual(["mentor.effort"]);
     const [params, added] = snapshot("workspace_add") as [WorkspaceAddParams, WorkspaceSummary];
@@ -163,7 +165,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(34);
+    expect(ALL_METHODS.length).toBe(35);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

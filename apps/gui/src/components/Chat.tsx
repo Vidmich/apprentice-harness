@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef } from "react";
 import { cancel, openSession, reloadSession, send } from "../lib/chat";
+import { addWorkspace } from "../lib/sessions";
 import { promptOf } from "../lib/transcript";
 import { type Chat as ChatTab, useStore } from "../store";
 import { useTranscripts } from "../stores/transcripts";
@@ -60,7 +61,11 @@ export default function Chat({ chat }: { chat: ChatTab }) {
 
   const browse = async () => {
     const picked = await open({ directory: true, multiple: false, title: "Workspace folder" });
-    if (typeof picked === "string") updateChat(chat.id, { workspace: picked });
+    if (typeof picked === "string") {
+      updateChat(chat.id, { workspace: picked });
+      // A folder picked here is a workspace like any other.
+      void addWorkspace(picked).catch((e: unknown) => console.warn("workspace.add failed:", e));
+    }
   };
 
   const workspace = transcript?.info?.workspace ?? chat.workspace;

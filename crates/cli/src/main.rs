@@ -390,6 +390,12 @@ mod tests {
             c.command,
             Command::Tools(tools::ToolsCommand::Rules(_))
         ));
+        let c = Cli::try_parse_from(["harness", "tools", "remove", "2", "--user"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Tools(tools::ToolsCommand::Remove(_))
+        ));
+        assert!(Cli::try_parse_from(["harness", "tools", "remove", "x"]).is_err());
         let c = Cli::try_parse_from(["harness", "run", "--permission-mode", "plan", "x"]).unwrap();
         assert!(matches!(c.command, Command::Run(_)));
         assert!(Cli::try_parse_from(["harness", "run", "--permission-mode", "yolo", "x"]).is_err());

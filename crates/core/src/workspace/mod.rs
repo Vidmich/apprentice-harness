@@ -30,7 +30,7 @@ mod snapshot;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
-pub use git::{GitHead, git_head};
+pub use git::{GitHead, git_dirty, git_head};
 pub use index::{FileEntry, FileIndex, INDEX_TTL, MAX_INDEX_FILES, language_of};
 pub use manager::Workspaces;
 pub use paths::{PathError, canonical_dir};

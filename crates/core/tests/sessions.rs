@@ -358,6 +358,7 @@ async fn every_message_is_stored_as_sent_and_the_session_resumes_after_a_restart
     let s = &list.sessions[0];
     assert_eq!(s.message_count, 6);
     assert_eq!(s.last_agent_status, Some(AgentStatus::Ok));
+    assert_eq!(s.running_agent, None, "the run has ended");
     assert_eq!(s.usage.input_tokens, 412 + 650 + 25);
     assert!(s.cost_usd.unwrap() > 0.0);
     assert!(s.last_activity >= s.created_at);
@@ -712,6 +713,28 @@ async fn search_finds_words_and_the_lifecycle_methods_hide_rename_and_delete() {
     .await
     .unwrap_err();
     assert_eq!(busy.kind(), Some("conflict"));
+    // The list and the session name the running agent (task M01-12).
+    let listed = sessions::list(&h.state, &SessionListParams::default())
+        .await
+        .unwrap();
+    let row = listed
+        .sessions
+        .iter()
+        .find(|s| s.id == session.as_str())
+        .unwrap();
+    assert_eq!(row.running_agent.as_deref(), Some(handle.agent_id.as_str()));
+    let got = sessions::get(
+        &h.state,
+        &SessionGetParams {
+            id: session.to_string(),
+            after_seq: None,
+            before_seq: None,
+            limit: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(got.session.summary.running_agent, row.running_agent);
     handle.cancel.cancel();
     collect(&mut rx).await;
 

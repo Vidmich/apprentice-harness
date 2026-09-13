@@ -78,6 +78,10 @@ pub struct SessionSummary {
     /// first run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_agent_status: Option<crate::events::AgentStatus>,
+    /// The agent running on the session right now, in the answering
+    /// daemon (task M01-12: the list shows it, a client may subscribe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub running_agent: Option<String>,
     /// Token totals over the session's mentor calls.
     #[serde(default)]
     pub usage: Usage,

@@ -4,12 +4,23 @@
 // after a reload (`agent.subscribe`), and fetching a tool's raw output
 // from the trace. Each session has one listener; events are folded in
 // batches so a fast stream costs one render per frame, not per delta.
+// Permission requests on any listener go to the permissions store,
+// keyed by session, and are answered with `respondPermission`.
 
-import { chatOf, useStore } from "../store";
+import { chatOf, chatOfSession, useStore } from "../store";
+import { usePermissions } from "../stores/permissions";
 import { transcriptOf, useTranscripts } from "../stores/transcripts";
-import { type EventNotification, type RpcError, type SessionGetResult, asKnown } from "./api";
+import {
+  type EventNotification,
+  type PermissionAnswer,
+  type RpcError,
+  type RuleSpec,
+  type SessionGetResult,
+  asKnown,
+} from "./api";
 import { type Unsubscribe, newChannel, subscribe } from "./events";
 import { RpcFailure, call, describe, stream } from "./rpc";
+import { refreshSessions, refreshWorkspaces } from "./sessions";
 import {
   type Transcript,
   applyEvent,
@@ -70,6 +81,14 @@ export async function reloadSession(sessionId: string): Promise<void> {
       limit: PAGE,
     });
   } catch (e) {
+    // A session the daemon no longer has (deleted elsewhere, another
+    // data dir): its chat closes rather than showing an error forever.
+    if (e instanceof RpcFailure && e.kind === "not_found") {
+      const chat = chatOfSession(sessionId);
+      forget(sessionId);
+      if (chat !== undefined) useStore.getState().closeChat(chat.id);
+      return;
+    }
     update(sessionId, (t) => failedLoad(t, describe(toError(e))));
     return;
   }
@@ -142,6 +161,7 @@ function flush(): void {
   const batches = [...queued.entries()];
   queued.clear();
   const now = Date.now();
+  const permissions = usePermissions.getState();
   for (const [sessionId, events] of batches) {
     let stepped = false;
     let finished = false;
@@ -149,6 +169,9 @@ function flush(): void {
       const e = asKnown(event);
       if (e?.type === "agent.step" && e.phase === "mentor" && e.seq > 1) stepped = true;
       if (e?.type === "agent.finished") finished = true;
+      if (e?.type.startsWith("permission.") === true || finished) {
+        permissions.apply(sessionId, event, now);
+      }
     }
     // One reducer call per event; the store sees the batch as one change.
     update(sessionId, (t) => events.reduce((next, ev) => applyEvent(next, ev, now), t));
@@ -165,9 +188,13 @@ function flush(): void {
 async function finish(sessionId: string): Promise<void> {
   await refresh(sessionId);
   update(sessionId, clearLive);
+  // The run may have changed the tree (the dirty marker) and the row.
+  void refreshWorkspaces().then(refreshSessions);
   const t = transcriptOf(sessionId);
   if (t?.info?.title_source !== "user") {
-    setTimeout(() => void refreshInfo(sessionId), TITLE_DELAY_MS);
+    setTimeout(() => {
+      void refreshInfo(sessionId).then(refreshSessions);
+    }, TITLE_DELAY_MS);
   }
 }
 
@@ -208,6 +235,8 @@ export async function send(chatId: number, prompt: string): Promise<void> {
     }
     store.updateChat(chatId, { sessionId });
     useTranscripts.getState().touch(sessionId);
+    // The daemon registered the folder as a workspace if it was new.
+    void refreshWorkspaces().then(refreshSessions);
   }
   const id = sessionId;
   const t = transcriptOf(id);
@@ -264,6 +293,30 @@ export async function reattach(sessionId: string, agentId: string): Promise<void
   } catch (e) {
     stopListening(sessionId);
     update(sessionId, (t) => failLive(t, toError(e)));
+  }
+}
+
+/**
+ * Answers a permission request. The daemon's decision event closes it
+ * everywhere; one it no longer knows (answered elsewhere, timed out)
+ * just goes.
+ */
+export async function respondPermission(
+  requestId: string,
+  answer: PermissionAnswer,
+  rule?: RuleSpec,
+): Promise<void> {
+  const params =
+    rule === undefined
+      ? { request_id: requestId, answer }
+      : { request_id: requestId, answer, rule };
+  try {
+    await call("permission.respond", params);
+  } catch (e) {
+    const failure = e instanceof RpcFailure ? e : undefined;
+    if (failure?.kind !== "not_found") throw e;
+  } finally {
+    usePermissions.getState().remove(requestId);
   }
 }
 

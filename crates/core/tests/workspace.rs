@@ -522,6 +522,7 @@ async fn add_is_idempotent_and_info_reports_the_tree() {
     assert_eq!(info.file_count, 0);
     assert_eq!(info.git_head, None);
     assert_eq!(info.git_branch, None);
+    assert_eq!(info.git_dirty, None);
     assert!(!info.has_instructions && !info.has_config && !info.has_ignore_file);
     assert!(info.config_overrides.is_empty());
     // Most recently used first.

@@ -106,3 +106,66 @@ Ask for something that reads, searches, edits, writes and runs:
       announce as "<tool> tool call, <status>"; tabs are a `tablist`.
 - [ ] Switch the OS theme between light and dark: colours, code
       highlighting and diff colours follow without a restart.
+
+## Workspaces, sessions, permissions, settings (task M01-12)
+
+Two checkouts help (any two folders; a git work tree shows the branch).
+
+- [ ] Workspace switcher: "Add folder…" registers a folder and selects
+      it; the row below shows its root, `⎇ branch` and a `●` when the
+      tree has uncommitted changes (`↻` re-reads); `×` forgets it (its
+      sessions stay, reachable under "All workspaces"); the CLI's
+      `harness workspace list` agrees.
+- [ ] "+ New session" (or `Ctrl+N`) opens a draft on the selected
+      workspace; the first send creates the session and the row appears
+      under _Today_ with a pulsing dot while it runs, then the cost
+      badge and the relative time. A folder typed or browsed in the
+      draft's header is registered too.
+- [ ] Two sessions run at once: start one, switch to another (or
+      `Ctrl+N`) and send there; the status bar says `2 running`, both
+      rows pulse, both transcripts complete. A run started with
+      `harness run` on the same daemon shows in the list within 30 s;
+      clicking its row reattaches.
+- [ ] Search: typing in the box shows message hits (newest first) with
+      the matching words highlighted; a hit opens its session; the
+      selected workspace filters the hits; `Esc` clears the box.
+- [ ] Row menu (right-click or `…`): _Rename_ edits in place (Enter
+      saves, Esc cancels) and the title survives a reload and the
+      generator; _Archive_ hides the row (visible again with "show
+      archived", _Unarchive_ brings it back); _Delete_ asks for a second
+      click; _Export…_ saves the `session.export` JSON where you choose.
+      Archive/Delete on a running session report `conflict`.
+- [ ] Permission dialog: with no rule for it, a `write_file` outside the
+      built-ins' scope (or a `shell` command) opens the dialog over the
+      chat: tool and risk badge, the command or paths, the mentor's
+      description, the countdown (`permissions.ask_timeout_s`), the
+      suggested rule with editable fields. `Allow once` runs the call;
+      the CLI's letters (`a s w A d D`) work as keys; `Esc` does not
+      cancel the run while the dialog is up.
+- [ ] `Allow in workspace` writes the rule (edit the glob first, e.g.
+      `docs/**`): it shows in Settings → Permissions → Rules as
+      `workspace:N` and in `harness tools rules`; the next identical
+      call does not ask. `Deny always` writes to the user file; the
+      card shows `denied`.
+- [ ] A request on a session that is not in front: the row gets a
+      count badge and a toast appears bottom-right; _Show_ brings the
+      session up with the dialog. Answering from the CLI (a second
+      `harness run --session` client) closes the dialog here.
+- [ ] Settings (`⚙` or `Ctrl+,`): each field shows where its value
+      comes from (`default` / `user` / `workspace` / `env`); changing
+      one writes it (`harness config get <key>` agrees) and _reset_
+      takes it out again; the _Workspace_ tab edits only overridable
+      keys and marks the others. Model/effort/thinking display apply to
+      the next session (`omitted` hides thinking after a daemon
+      restart). The API key field is write-only and saving it updates
+      the status bar.
+- [ ] Rules editor: _Add rule_ appends to the chosen file; _remove_
+      takes a file rule out; built-ins have no remove; "open in editor"
+      opens the file. A broken file shows NOT IN FORCE with the line.
+- [ ] Data: the paths match `harness config path`; "open folder" opens
+      the data directory; the size is plausible. About: daemon version,
+      pid, uptime, the log files open; "restart daemon" reconnects.
+- [ ] Closing the window leaves `harnessd` running (`harness daemon
+status`); reopening the app restores the selected workspace and
+      the last session. The tray icon offers "Show", "Quit (daemon keeps
+      running)" and "Quit and stop the daemon" — the last one stops it.

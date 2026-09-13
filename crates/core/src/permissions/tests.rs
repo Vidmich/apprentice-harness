@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use super::rules::{Layer, append_rule, builtin_rules, command_has_prefix, evaluate, parse_rules};
+use super::rules::{
+    Layer, append_rule, builtin_rules, command_has_prefix, evaluate, parse_rules, remove_rule,
+};
 use super::{
     Ask, Engine, NoClient, PermissionBroker, PermissionGate, PermissionRequest, Prompter, Reply,
     SessionRules, suggest,
@@ -589,6 +591,57 @@ fn appended_rules_keep_the_file_sound_and_report_their_line() {
     let err = append_rule(&broken, &rule, "").unwrap_err();
     assert!(err.to_string().contains("broken.toml:1:"), "{err}");
     assert_eq!(std::fs::read_to_string(&broken).unwrap(), "default = \n");
+}
+
+#[test]
+fn removed_rules_leave_the_rest_of_the_file_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("permissions.toml");
+    std::fs::write(&path, "# mine\ndefault = \"deny\"\n").unwrap();
+    let allow = RuleSpec {
+        tool: "shell".into(),
+        effect: RuleEffect::Allow,
+        r#match: RuleMatch {
+            command_prefix: Some("cargo test".into()),
+            ..RuleMatch::default()
+        },
+    };
+    let deny = RuleSpec {
+        tool: "write_file".into(),
+        effect: RuleEffect::Deny,
+        r#match: RuleMatch {
+            path: Some("secrets/**".into()),
+            ..RuleMatch::default()
+        },
+    };
+    append_rule(&path, &allow, "first").unwrap();
+    append_rule(&path, &deny, "second").unwrap();
+
+    // Out of range, and the file is untouched.
+    let before = std::fs::read_to_string(&path).unwrap();
+    let err = remove_rule(&path, 3).unwrap_err();
+    assert!(err.to_string().contains("no rule 3"), "{err}");
+    assert!(remove_rule(&path, 0).is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+    assert_eq!(remove_rule(&path, 1).unwrap(), allow);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with("# mine\ndefault = \"deny\"\n"), "{text}");
+    assert!(!text.contains("cargo test"), "{text}");
+    assert!(text.contains("# second\n[[rule]]\n"), "{text}");
+    let (default, rules) = parse_rules(&path, &text).unwrap();
+    assert_eq!(default, Some(apprentice_api::types::RuleDefault::Deny));
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].spec, deny);
+
+    // The last one goes with its `rule` array; the header stays.
+    assert_eq!(remove_rule(&path, 1).unwrap(), deny);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("[[rule]]"), "{text}");
+    let (default, rules) = parse_rules(&path, &text).unwrap();
+    assert_eq!(default, Some(apprentice_api::types::RuleDefault::Deny));
+    assert!(rules.is_empty());
+    assert!(remove_rule(&dir.path().join("none.toml"), 1).is_err());
 }
 
 #[test]

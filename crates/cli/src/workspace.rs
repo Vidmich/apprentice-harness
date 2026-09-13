@@ -178,17 +178,22 @@ fn print_info(ctx: &Ctx, r: &WorkspaceInfoResult) -> anyhow::Result<()> {
         ),
         ("index age", format!("{} s", r.index_age_s)),
     ];
+    let dirty = match r.git_dirty {
+        Some(true) => ", dirty",
+        Some(false) => ", clean",
+        None => "",
+    };
     if let Some(head) = &r.git_head {
         let short: String = head.chars().take(12).collect();
         rows.push((
             "git",
             match &r.git_branch {
-                Some(b) => format!("{b} @ {short}"),
-                None => format!("detached @ {short}"),
+                Some(b) => format!("{b} @ {short}{dirty}"),
+                None => format!("detached @ {short}{dirty}"),
             },
         ));
     } else if let Some(b) = &r.git_branch {
-        rows.push(("git", format!("{b} (no commits)")));
+        rows.push(("git", format!("{b} (no commits){dirty}")));
     }
     rows.push(("HARNESS.md", yes_no(r.has_instructions).to_owned()));
     rows.push(("config.toml", yes_no(r.has_config).to_owned()));

@@ -66,3 +66,38 @@ export function clock(ts: string | number): string {
   if (Number.isNaN(d.getTime())) return String(ts);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+
+/** `now`, `4m`, `3h`, `2d`, else the date — for the sessions list. */
+export function ago(ts: string | number, now = Date.now()): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  const s = Math.max(0, Math.round((now - d.getTime()) / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+export type DayGroup = "Today" | "Yesterday" | "Earlier";
+
+/** Which of the sidebar's groups a time falls in (local days). */
+export function dayGroup(ts: string, now = new Date()): DayGroup {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "Earlier";
+  const day = (x: Date) => Math.floor((x.getTime() - x.getTimezoneOffset() * 60_000) / 86_400_000);
+  const diff = day(now) - day(d);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return "Earlier";
+}
+
+/** `1h 02m` for an uptime in seconds. */
+export function uptime(s: number): string {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ${String(m - h * 60).padStart(2, "0")}m`;
+  return `${Math.floor(h / 24)}d ${h - Math.floor(h / 24) * 24}h`;
+}

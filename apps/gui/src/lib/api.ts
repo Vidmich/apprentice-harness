@@ -66,6 +66,8 @@ export interface SessionSummary {
   last_activity: string;
   /** How the last agent on the session ended; absent before the first run. */
   last_agent_status?: AgentStatus;
+  /** The agent running on the session right now (in the answering daemon). */
+  running_agent?: string;
   /** Token totals over the session's mentor calls. */
   usage: Usage;
   /** Cost of those calls; absent when one had no price. */
@@ -515,6 +517,19 @@ export interface ToolsRuleResult {
   rule: RuleSpec;
 }
 
+/** `tools.remove`: one `[[rule]]` of a file, by the index `tools.rules` lists. */
+export interface ToolsRemoveParams {
+  layer: ConfigLayer;
+  /** Required for the workspace layer. */
+  workspace?: string;
+  index: number;
+}
+
+export interface ToolsRemoveResult {
+  path: string;
+  rule: RuleSpec;
+}
+
 // ---------------------------------------------------------------- prompt.*
 
 export interface PromptShowParams {
@@ -584,6 +599,8 @@ export interface WorkspaceInfoResult extends WorkspaceSummary {
   index_age_s: number;
   git_head?: string;
   git_branch?: string;
+  /** Staged, unstaged or untracked changes; absent when not a work tree. */
+  git_dirty?: boolean;
   has_instructions: boolean;
   has_config: boolean;
   has_ignore_file: boolean;
@@ -619,6 +636,7 @@ export interface Methods {
   "tools.rules": { params: ToolsRulesParams; result: ToolsRulesResult };
   "tools.allow": { params: ToolsRuleParams; result: ToolsRuleResult };
   "tools.deny": { params: ToolsRuleParams; result: ToolsRuleResult };
+  "tools.remove": { params: ToolsRemoveParams; result: ToolsRemoveResult };
   "prompt.show": { params: PromptShowParams; result: PromptShowResult };
   "permission.respond": { params: PermissionRespondParams; result: Empty };
   "workspace.add": { params: WorkspaceAddParams; result: WorkspaceSummary };
@@ -663,6 +681,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "tools.rules",
   "tools.allow",
   "tools.deny",
+  "tools.remove",
   "prompt.show",
   "permission.respond",
   "workspace.add",

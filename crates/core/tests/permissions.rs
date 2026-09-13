@@ -11,7 +11,7 @@ use apprentice_api::events::Event;
 use apprentice_api::jsonrpc::codes;
 use apprentice_api::methods::{
     PermissionRespond, PermissionRespondParams, SessionCreateParams, ToolsAllow, ToolsDeny,
-    ToolsRuleParams, ToolsRules, ToolsRulesParams,
+    ToolsRemove, ToolsRemoveParams, ToolsRuleParams, ToolsRules, ToolsRulesParams,
 };
 use apprentice_api::server::{Router, RouterConfig};
 use apprentice_api::types::{
@@ -170,6 +170,38 @@ async fn rules_are_listed_and_added_over_rpc() {
     assert_eq!(heads[1], (RuleSource::User, 1, Some(2)));
     assert_eq!(heads[2], (RuleSource::Builtin, 1, None));
     assert!(r.files.iter().all(|f| f.exists && f.error.is_none()));
+
+    // tools.remove takes the user rule out again; the file stays sound.
+    let removed = h
+        .client
+        .call::<ToolsRemove>(ToolsRemoveParams {
+            layer: ConfigLayer::User,
+            workspace: None,
+            index: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(removed.path, denied.path);
+    assert_eq!(removed.rule, denied.rule);
+    let r = h
+        .client
+        .call::<ToolsRules>(ToolsRulesParams {
+            workspace: Some(h.root()),
+        })
+        .await
+        .unwrap();
+    assert!(r.rules.iter().all(|r| r.source != RuleSource::User));
+    assert!(r.files[1].exists && r.files[1].error.is_none());
+    let err = h
+        .client
+        .call::<ToolsRemove>(ToolsRemoveParams {
+            layer: ConfigLayer::User,
+            workspace: None,
+            index: 1,
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no rule 1"), "{err}");
 
     // The workspace layer needs a workspace; a broken file is reported
     // with its line and refused for appends.
