@@ -572,6 +572,61 @@ mod tests {
     }
 
     #[test]
+    fn outcome_commands_parse() {
+        for (args, want) in [
+            (vec!["session", "mark", "s1", "accept"], "session"),
+            (
+                vec![
+                    "session",
+                    "mark",
+                    "s1",
+                    "reject",
+                    "--note",
+                    "wrong file",
+                    "--agent",
+                    "a1",
+                ],
+                "session",
+            ),
+            (vec!["session", "mark", "s1", "done"], "session"),
+            (vec!["stats", "outcomes"], "stats"),
+            (
+                vec!["stats", "outcomes", "--since", "7d", "--workspace", "w1"],
+                "stats",
+            ),
+            (vec!["workspace", "init"], "workspace"),
+            (vec!["workspace", "init", "w1", "--force"], "workspace"),
+            (vec!["trace", "replay-check", "--since", "1d"], "trace"),
+        ] {
+            let mut full = vec!["harness"];
+            full.extend(args.iter());
+            let c = Cli::try_parse_from(&full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            let got = match c.command {
+                Command::Session(_) => "session",
+                Command::Stats(_) => "stats",
+                Command::Workspace(_) => "workspace",
+                Command::Trace(_) => "trace",
+                _ => "other",
+            };
+            assert_eq!(got, want, "{args:?}");
+        }
+        assert!(Cli::try_parse_from(["harness", "session", "mark", "s1", "maybe"]).is_err());
+        assert!(Cli::try_parse_from(["harness", "session", "mark", "s1"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "harness",
+                "trace",
+                "replay-check",
+                "--call",
+                "m1",
+                "--since",
+                "1d"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn exit_codes_follow_the_contract() {
         let not_running: anyhow::Error = ConnectError::NotRunning {
             info_file: PathBuf::from("x"),

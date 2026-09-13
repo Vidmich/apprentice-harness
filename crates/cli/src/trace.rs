@@ -107,6 +107,12 @@ pub struct ReplayCheckArgs {
     /// Only this call.
     #[arg(long, value_name = "ID")]
     call: Option<String>,
+    /// Only calls started at or after this (`1d`, `2026-09-01`, ...).
+    #[arg(long, value_name = "WHEN", conflicts_with = "call")]
+    since: Option<String>,
+    /// Only calls started before this.
+    #[arg(long, value_name = "WHEN", conflicts_with = "call")]
+    until: Option<String>,
     /// Also rebuild each request from the stored conversation.
     #[arg(long)]
     rebuild: bool,
@@ -267,6 +273,8 @@ pub fn run(ctx: &Ctx, cmd: &TraceCommand) -> anyhow::Result<()> {
                 session_id: a.session.clone(),
                 agent_id: a.agent.clone(),
                 call_id: a.call.clone(),
+                since: a.since.clone(),
+                until: a.until.clone(),
                 rebuild: a.rebuild,
             };
             let r = with_client(ctx, |c| async move {

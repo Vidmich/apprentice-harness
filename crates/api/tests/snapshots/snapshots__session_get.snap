@@ -1,6 +1,6 @@
 ---
 source: crates/api/tests/snapshots.rs
-expression: "(SessionGetParams\n{ id: \"s1\".into(), after_seq: None, before_seq: Some(3), limit: Some(2), },\nSessionGetResult\n{\n    session: info.clone(), messages: messages.clone(), has_more: true, agents:\n    vec![AgentSummary\n    {\n        id: \"a1\".into(), status: \"ok\".into(), started_at:\n        \"2026-09-12T10:00:01.000Z\".into(), ended_at:\n        Some(\"2026-09-12T10:00:09.000Z\".into()), model:\n        Some(\"claude-opus-5\".into()), calls: 2, usage, cost_usd: Some(0.0138),\n    }],\n})"
+expression: "(SessionGetParams\n{ id: \"s1\".into(), after_seq: None, before_seq: Some(3), limit: Some(2), },\nSessionGetResult\n{\n    session: info.clone(), messages: messages.clone(), has_more: true, agents:\n    vec![AgentSummary\n    {\n        id: \"a1\".into(), status: \"ok\".into(), started_at:\n        \"2026-09-12T10:00:01.000Z\".into(), ended_at:\n        Some(\"2026-09-12T10:00:09.000Z\".into()), model:\n        Some(\"claude-opus-5\".into()), calls: 2, usage, cost_usd: Some(0.0138),\n        error: None, outcomes:\n        vec![OutcomeInfo\n        {\n            event_id: \"e20\".into(), kind: \"tests\".into(), summary:\n            \"12 passed (cargo test)\".into(), ok: Some(true), details:\n            json!({\n                \"runner\": \"cargo\", \"passed\": 12, \"failed\": 0, \"skipped\": 1,\n                \"exit_code\": 0, \"duration_ms\": 2410, \"command\": \"cargo test\",\n                \"source\": \"run_tests\",\n            }), at: \"2026-09-12T10:00:07.000Z\".into(),\n        }, OutcomeInfo\n        {\n            event_id: \"e24\".into(), kind: \"files_changed\".into(), summary:\n            \"1 file added\".into(), ok: None, details:\n            json!({\n                \"changed\": [], \"added\": [\"src/hello.rs\"], \"deleted\": [],\n                \"counts\": { \"changed\": 0, \"added\": 1, \"deleted\": 0 },\n            }), at: \"2026-09-12T10:00:09.000Z\".into(),\n        },],\n    }],\n})"
 ---
 [
   {
@@ -93,7 +93,44 @@ expression: "(SessionGetParams\n{ id: \"s1\".into(), after_seq: None, before_seq
           "cache_read_input_tokens": 900,
           "cache_creation_input_tokens": 0
         },
-        "cost_usd": 0.0138
+        "cost_usd": 0.0138,
+        "outcomes": [
+          {
+            "event_id": "e20",
+            "kind": "tests",
+            "summary": "12 passed (cargo test)",
+            "ok": true,
+            "details": {
+              "command": "cargo test",
+              "duration_ms": 2410,
+              "exit_code": 0,
+              "failed": 0,
+              "passed": 12,
+              "runner": "cargo",
+              "skipped": 1,
+              "source": "run_tests"
+            },
+            "at": "2026-09-12T10:00:07.000Z"
+          },
+          {
+            "event_id": "e24",
+            "kind": "files_changed",
+            "summary": "1 file added",
+            "details": {
+              "added": [
+                "src/hello.rs"
+              ],
+              "changed": [],
+              "counts": {
+                "added": 1,
+                "changed": 0,
+                "deleted": 0
+              },
+              "deleted": []
+            },
+            "at": "2026-09-12T10:00:09.000Z"
+          }
+        ]
       }
     ]
   }

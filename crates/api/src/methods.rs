@@ -9,9 +9,10 @@ use serde_json::Value;
 
 use crate::types::{
     AgentSummary, BundleCounts, BundleManifest, CallSummary, ConfigLayer, ConfigSource,
-    EventSummary, ImportedSession, PermissionAnswer, ReplayReport, RuleFileInfo, RuleInfo,
-    RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
-    SessionSummary, StatsGroup, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
+    EventSummary, ImportedSession, OutcomeInfo, OutcomeStats, PermissionAnswer, ReplayReport,
+    RuleFileInfo, RuleInfo, RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo,
+    SessionMark, SessionMessage, SessionSearchHit, SessionSummary, StatsGroup, TokenStats,
+    ToolInfo, TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -351,6 +352,32 @@ method!(
     SessionExportMethod, "session.export", SessionIdParams, SessionExport
 );
 
+/// `session.mark` (task M01-15): the user's verdict on a run, recorded
+/// as an `outcome` event on `agent_id` (default: the session's last
+/// agent). `not_found` for a session without a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMarkParams {
+    pub id: String,
+    pub mark: SessionMark,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMarkResult {
+    pub agent_id: String,
+    pub outcome: OutcomeInfo,
+}
+
+method!(
+    SessionMarkMethod,
+    "session.mark",
+    SessionMarkParams,
+    SessionMarkResult
+);
+
 // ---------------------------------------------------------------- agent.*
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -528,6 +555,12 @@ pub struct TraceReplayCheckParams {
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
+    /// Calls started at or after this (the `stats` range grammar;
+    /// task M01-15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
     /// Also rebuild each request from the stored conversation and
     /// compare it to the body.
     #[serde(default)]
@@ -633,6 +666,25 @@ method!(
     "stats.reprice",
     StatsRepriceParams,
     StatsRepriceResult
+);
+
+/// `stats.outcomes` (task M01-15): the outcome signals of the runs
+/// started in a range. Times compare against the agent start.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StatsOutcomesParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+}
+
+method!(
+    StatsOutcomes,
+    "stats.outcomes",
+    StatsOutcomesParams,
+    OutcomeStats
 );
 
 // ---------------------------------------------------------------- tools.*
@@ -896,6 +948,32 @@ method!(
     WorkspaceRefresh, "workspace.refresh", WorkspaceIdParams, WorkspaceInfoResult
 );
 
+/// `workspace.init` (task M01-15): writes the sample
+/// `.harness/HARNESS.md` into a workspace. `conflict` when the file
+/// exists unless `force`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceInitParams {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceInitResult {
+    /// The file written, absolute.
+    pub path: String,
+    /// An existing file was overwritten (`force`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replaced: bool,
+}
+
+method!(
+    WorkspaceInit,
+    "workspace.init",
+    WorkspaceInitParams,
+    WorkspaceInitResult
+);
+
 /// Every method name known to this API version, for parity checks and
 /// documentation.
 pub const ALL_METHODS: &[&str] = &[
@@ -915,6 +993,7 @@ pub const ALL_METHODS: &[&str] = &[
     SessionDelete::NAME,
     SessionRename::NAME,
     SessionExportMethod::NAME,
+    SessionMarkMethod::NAME,
     AgentRun::NAME,
     AgentCancel::NAME,
     AgentSubscribe::NAME,
@@ -926,6 +1005,7 @@ pub const ALL_METHODS: &[&str] = &[
     StatsTokens::NAME,
     StatsCalls::NAME,
     StatsReprice::NAME,
+    StatsOutcomes::NAME,
     ToolsList::NAME,
     ToolsRules::NAME,
     ToolsAllow::NAME,
@@ -938,6 +1018,7 @@ pub const ALL_METHODS: &[&str] = &[
     WorkspaceRemove::NAME,
     WorkspaceInfo::NAME,
     WorkspaceRefresh::NAME,
+    WorkspaceInit::NAME,
 ];
 
 #[cfg(test)]

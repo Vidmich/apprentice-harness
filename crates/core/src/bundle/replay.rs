@@ -24,6 +24,9 @@ pub struct ReplaySelection {
     pub session_id: Option<String>,
     pub agent_id: Option<String>,
     pub call_id: Option<String>,
+    /// Bounds on the call start, resolved timestamps (task M01-15).
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 /// Runs the checks over the selection.
@@ -40,6 +43,8 @@ pub fn replay_check(
         None => store.list_mentor_calls(&CallFilter {
             session_id: sel.session_id.as_deref().map(SessionId::from),
             agent_id: sel.agent_id.as_deref().map(Into::into),
+            since: sel.since.clone(),
+            until: sel.until.clone(),
             ..CallFilter::default()
         })?,
     };

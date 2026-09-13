@@ -8,6 +8,7 @@ pub mod app;
 pub mod bundle;
 pub mod config;
 pub mod mentor;
+pub mod outcomes;
 pub mod permissions;
 pub mod runtime;
 pub mod secrets;

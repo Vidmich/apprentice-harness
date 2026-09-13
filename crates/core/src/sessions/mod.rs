@@ -1,8 +1,9 @@
 //! The `session.*` methods (task M01-10) over the store and the
 //! runtime: create, list with activity and cost, read the stored
-//! conversation, search it, archive, delete, rename, export. The
-//! mutations refuse a session with an agent running on it and keep the
-//! in-memory conversation in step with the store. [`title`] names
+//! conversation, search it, archive, delete, rename, export, and (task
+//! M01-15) `mark` — the user's verdict on a run as an `outcome` event.
+//! The mutations refuse a session with an agent running on it and keep
+//! the in-memory conversation in step with the store. [`title`] names
 //! sessions.
 
 pub mod title;
@@ -14,13 +15,15 @@ use apprentice_api::methods::{
     Empty, SessionArchive, SessionArchiveParams, SessionCreate, SessionCreateParams, SessionDelete,
     SessionDeleteParams, SessionDeleteResult, SessionExportMethod, SessionGet, SessionGetParams,
     SessionGetResult, SessionIdParams, SessionList, SessionListParams, SessionListResult,
-    SessionRename, SessionRenameParams, SessionSearch, SessionSearchParams, SessionSearchResult,
+    SessionMarkMethod, SessionMarkParams, SessionMarkResult, SessionRename, SessionRenameParams,
+    SessionSearch, SessionSearchParams, SessionSearchResult,
 };
 use apprentice_api::server::{Connection, Router};
 use apprentice_api::types::SessionExport;
 use serde_json::json;
 
 use crate::app::AppState;
+use crate::outcomes::{self, Outcome};
 use crate::trace::{NewEvent, SessionId, SessionQuery, StoredMessage, TitleSource, kinds};
 
 /// Messages `session.get` returns when `limit` is absent.
@@ -68,6 +71,65 @@ pub fn register(state: &Arc<AppState>, router: &mut Router) {
         let state = Arc::clone(&s);
         async move { export(&state, &p).await }
     });
+    let s = Arc::clone(state);
+    router.add::<SessionMarkMethod, _, _>(move |_c: Arc<Connection>, p: SessionMarkParams| {
+        let state = Arc::clone(&s);
+        async move { mark(&state, &p).await }
+    });
+}
+
+/// `session.mark`: the user's verdict on a run — `user_accept`,
+/// `user_reject` or `task_done` as an `outcome` event on `agent_id`
+/// (default: the session's last agent). A running agent's subscribers
+/// hear of it as `agent.outcome`.
+///
+/// # Errors
+/// Unknown session or agent; `not_found` when the session has no
+/// agent; `invalid_params` when the agent is not the session's.
+pub async fn mark(
+    state: &Arc<AppState>,
+    p: &SessionMarkParams,
+) -> Result<SessionMarkResult, RpcError> {
+    let id = SessionId::from(p.id.as_str());
+    let store = Arc::clone(state.store());
+    let sid = id.clone();
+    let wanted = p.agent_id.clone();
+    let agent = blocking(move || {
+        store.get_session(&sid)?;
+        let agents = store.list_agents(&sid)?;
+        match wanted {
+            Some(a) => agents
+                .into_iter()
+                .find(|r| r.id.as_str() == a)
+                .map(|r| r.id)
+                .ok_or_else(|| {
+                    RpcError::invalid_params(format!("agent {a} is not a run of session {sid}"))
+                }),
+            None => agents
+                .last()
+                .map(|r| r.id.clone())
+                .ok_or_else(|| RpcError::not_found(format!("session {sid} has no run to mark"))),
+        }
+    })
+    .await?;
+    let outcome = Outcome::mark(p.mark, p.note.as_deref());
+    let ev = outcome.event(id.clone(), agent.clone());
+    let event_id = state.writer().append(ev).await?;
+    let (summary, _) = outcome.describe();
+    tracing::info!(session = %id, agent = %agent, kind = outcome.kind, %summary, "session marked");
+    let live = outcome.live_event(&agent, event_id.as_str());
+    if let Some(handle) = state.agents().get(&agent) {
+        crate::permissions::EventSink::emit(&handle, live);
+    }
+    let at = state
+        .store()
+        .get_event(&event_id)
+        .map(|e| e.summary.ts)
+        .unwrap_or_default();
+    Ok(SessionMarkResult {
+        agent_id: agent.to_string(),
+        outcome: outcomes::info(event_id.as_str(), &outcome.payload(), &at),
+    })
 }
 
 /// `session.list`.

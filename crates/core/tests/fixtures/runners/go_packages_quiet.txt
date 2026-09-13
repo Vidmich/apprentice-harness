@@ -1,0 +1,5 @@
+ok  	example.com/demo/math	0.012s
+?   	example.com/demo/cmd	[no test files]
+ok  	example.com/demo/server	(cached)
+FAIL	example.com/demo/broken [build failed]
+exit 1 · 0.5 s

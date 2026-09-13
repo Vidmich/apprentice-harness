@@ -21,9 +21,11 @@ mod agent;
 pub mod conversation;
 pub mod hooks;
 pub mod prompt;
+mod revert;
 pub(crate) mod rpc;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -36,7 +38,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{Instrument, info, info_span, warn};
 
-pub use agent::DEFAULT_WAIT;
+pub use agent::{DEFAULT_WAIT, stall_window};
 pub use conversation::{CONTINUE_MESSAGE, Conversation, hash_tools};
 pub use hooks::{CallContext, NoopHooks, StepHooks, ToolExecContext, ToolResultContext};
 pub use prompt::{
@@ -67,9 +69,60 @@ pub struct AgentHandle {
     events: broadcast::Sender<Event>,
     /// The `agent.finished` event once there is one.
     finished: watch::Receiver<Option<Event>>,
+    /// When the agent last showed a sign of life, for the watchdog.
+    activity: Arc<Activity>,
+}
+
+/// The stalled-agent watchdog's view of a run (task M01-15): the
+/// moment of the last event, and whether the watchdog gave up on it.
+#[derive(Debug)]
+pub struct Activity {
+    last: Mutex<Instant>,
+    stalled: AtomicBool,
+}
+
+impl Default for Activity {
+    fn default() -> Self {
+        Self {
+            last: Mutex::new(Instant::now()),
+            stalled: AtomicBool::new(false),
+        }
+    }
+}
+
+impl Activity {
+    /// Notes a sign of life now.
+    pub fn touch(&self) {
+        *self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Instant::now();
+    }
+
+    /// Time since the last sign of life.
+    pub fn idle(&self) -> Duration {
+        self.last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .elapsed()
+    }
+
+    /// The watchdog ended the run.
+    pub fn mark_stalled(&self) {
+        self.stalled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_stalled(&self) -> bool {
+        self.stalled.load(Ordering::SeqCst)
+    }
 }
 
 impl AgentHandle {
+    /// The run's activity record (see [`Activity`]).
+    pub fn activity(&self) -> &Arc<Activity> {
+        &self.activity
+    }
+
     /// Future events of this agent (nothing is replayed). Subscribe, then
     /// check [`Self::finished_event`]: an agent that ended before the
     /// subscription will send nothing more.
@@ -107,6 +160,7 @@ impl AgentHandle {
     fn emit(&self, event: Event) {
         // No subscriber is fine: the trace is the record, events are a
         // live view.
+        self.activity.touch();
         let _ = self.events.send(event);
     }
 }
@@ -115,6 +169,7 @@ impl AgentHandle {
 /// is how it knows a run is headless.
 impl EventSink for AgentHandle {
     fn emit(&self, event: Event) -> bool {
+        self.activity.touch();
         self.events.send(event).is_ok()
     }
 }
@@ -303,6 +358,7 @@ pub async fn run_agent_with(
         cancel: state.shutdown().child_token(),
         events,
         finished,
+        activity: Arc::new(Activity::default()),
     };
     let registry = state.agents();
     // From here on a second `agent.run` on the session is a conflict;

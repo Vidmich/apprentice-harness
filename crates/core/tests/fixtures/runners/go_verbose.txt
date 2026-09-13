@@ -1,0 +1,17 @@
+=== RUN   TestAdd
+--- PASS: TestAdd (0.00s)
+=== RUN   TestSub
+    math_test.go:14: got 1, want 2
+--- FAIL: TestSub (0.00s)
+=== RUN   TestSlow
+    math_test.go:20: skipping in short mode
+--- SKIP: TestSlow (0.00s)
+=== RUN   TestMul
+--- PASS: TestMul (0.00s)
+FAIL
+FAIL	example.com/demo/math	0.012s
+=== RUN   TestServer
+--- PASS: TestServer (0.10s)
+PASS
+ok  	example.com/demo/server	0.113s
+exit 1 · 0.9 s

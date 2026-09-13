@@ -457,6 +457,16 @@ fn the_builtin_deny_list_catches_catastrophes_and_a_file_can_override() {
     asked("echo format c:");
     asked("chmod -R 755 ./scripts");
 
+    // Any tool that carries the command is caught (task M01-15).
+    let e = evaluate(
+        &[],
+        &req("run_tests", Risk::Execute, &json!({"command": "rm -rf /"})),
+    );
+    assert_eq!(e.effect, RuleEffect::Deny);
+    assert_eq!(e.rule_ref.as_deref(), Some("builtin:rm_recursive_root"));
+    let e = evaluate(&[], &req("run_tests", Risk::Execute, &json!({})));
+    assert_eq!(e.effect, RuleEffect::Ask);
+
     // An explicit allow in a file wins over the built-in deny.
     let dir = tempfile::tempdir().unwrap();
     let user = layer(

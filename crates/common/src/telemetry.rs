@@ -205,6 +205,17 @@ fn time_today() -> String {
 
 /// Logs panics at `error` with a backtrace before the default hook runs.
 pub fn install_panic_hook() {
+    install_panic_hook_with(String::new);
+}
+
+/// Like [`install_panic_hook`], with a crash report line first:
+/// `context()` is asked at the moment of the panic for what the process
+/// was doing (the daemon names its last RPC method, task M01-15) and
+/// logged as `crash report: ... (context)`.
+pub fn install_panic_hook_with<F>(context: F)
+where
+    F: Fn() -> String + Send + Sync + 'static,
+{
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let location = info
@@ -213,10 +224,22 @@ pub fn install_panic_hook() {
             .unwrap_or_default();
         let message = panic_message(info);
         let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+        let context = context();
+        let thread = std::thread::current();
+        let thread = thread.name().unwrap_or("?");
+        if !context.is_empty() {
+            tracing::error!(
+                target: "panic",
+                %location,
+                thread,
+                %context,
+                "crash report: panic at {location} on thread {thread}: {message} ({context})"
+            );
+        }
         tracing::error!(
             target: "panic",
             %location,
-            thread = std::thread::current().name().unwrap_or("?"),
+            thread,
             backtrace,
             "panic: {message}"
         );

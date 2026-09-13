@@ -128,6 +128,28 @@ expression: notifications
     "subscription": "a1",
     "seq": 11,
     "event": {
+      "type": "agent.outcome",
+      "agent_id": "a1",
+      "event_id": "e20",
+      "kind": "tests",
+      "summary": "11 passed, 1 failed (cargo test)",
+      "ok": false,
+      "details": {
+        "command": "cargo test",
+        "duration_ms": 2410,
+        "exit_code": 101,
+        "failed": 1,
+        "passed": 11,
+        "runner": "cargo",
+        "skipped": 0,
+        "source": "shell"
+      }
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 12,
+    "event": {
       "type": "agent.finished",
       "agent_id": "a1",
       "status": "error",
@@ -142,7 +164,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 12,
+    "seq": 13,
     "event": {
       "type": "permission.request",
       "request_id": "p1",
@@ -171,7 +193,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 13,
+    "seq": 14,
     "event": {
       "type": "permission.decision",
       "agent_id": "a1",
@@ -185,7 +207,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 14,
+    "seq": 15,
     "event": {
       "type": "log",
       "level": "warn",

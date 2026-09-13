@@ -101,6 +101,9 @@ pub struct Executed {
     pub truncated: bool,
     pub duration: Duration,
     pub result_event: Option<EventId>,
+    /// The tool's structured facts (`tool.result.metadata`): exit code
+    /// and timing of a shell run, the parsed outcome of `run_tests`.
+    pub metadata: Value,
 }
 
 impl Executed {
@@ -484,7 +487,7 @@ impl<'a> Executor<'a> {
             payload["message"] = json!(m);
         }
         if !metadata.is_null() {
-            payload["metadata"] = metadata;
+            payload["metadata"] = metadata.clone();
         }
         if !attached.is_empty() {
             payload["attachments"] = Value::Array(attached);
@@ -517,6 +520,7 @@ impl<'a> Executor<'a> {
             truncated,
             duration,
             result_event,
+            metadata,
         }
     }
 }

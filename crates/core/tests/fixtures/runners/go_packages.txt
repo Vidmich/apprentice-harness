@@ -1,0 +1,9 @@
+ok  	example.com/demo/math	0.012s
+?   	example.com/demo/cmd	[no test files]
+FAIL	example.com/demo/server	0.113s
+--- FAIL: TestServer (0.10s)
+    server_test.go:22: status 500
+FAIL
+FAIL	example.com/demo/server	0.113s
+ok  	example.com/demo/util	(cached)
+exit 1 · 0.8 s

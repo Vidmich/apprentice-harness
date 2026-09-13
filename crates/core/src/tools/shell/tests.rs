@@ -37,6 +37,7 @@ impl Fixture {
         std::fs::create_dir_all(dir.path().join("sub")).unwrap();
         let ws = Arc::new(Workspace::open(dir.path()).unwrap());
         let mut tools = shell_tools();
+        let _run_tests = tools.pop().unwrap();
         let jobs = tools.pop().unwrap();
         let shell = tools.pop().unwrap();
         Self {

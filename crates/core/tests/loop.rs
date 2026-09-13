@@ -293,6 +293,7 @@ async fn a_three_step_trajectory_streams_events_and_records_every_step() {
             } => format!("result {name} {call_id} ok={ok}"),
             Event::AgentTextDelta { text, .. } => format!("text {text:?}"),
             Event::AgentUsage { .. } => "usage".into(),
+            Event::AgentOutcome { kind, summary, .. } => format!("outcome {kind}: {summary}"),
             other => serde_json::to_value(other).unwrap()["type"]
                 .as_str()
                 .unwrap()
@@ -326,6 +327,7 @@ async fn a_three_step_trajectory_streams_events_and_records_every_step() {
             "text \"world\"",
             "text \"!\"",
             "usage",
+            "outcome files_changed: 1 file added",
             "agent.finished",
         ]
     );

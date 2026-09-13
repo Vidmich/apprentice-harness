@@ -1,0 +1,281 @@
+---
+source: crates/core/tests/runners.rs
+expression: golden
+---
+{
+  "cargo_compile_error": {
+    "counts": {
+      "failed": 0,
+      "passed": 0,
+      "recognised": false,
+      "skipped": 0
+    },
+    "details": {
+      "command": "cargo test",
+      "duration_ms": 1500,
+      "exit_code": 101,
+      "failed": 0,
+      "parsed": false,
+      "passed": 0,
+      "runner": "cargo",
+      "skipped": 0,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "tests: exit 101 (cargo test)"
+  },
+  "cargo_failed": {
+    "counts": {
+      "failed": 1,
+      "passed": 1,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "cargo test",
+      "duration_ms": 1500,
+      "exit_code": 101,
+      "failed": 1,
+      "parsed": true,
+      "passed": 1,
+      "runner": "cargo",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "1 passed, 1 failed, 1 skipped, exit 101 (cargo test)"
+  },
+  "cargo_ok": {
+    "counts": {
+      "failed": 0,
+      "passed": 5,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "cargo test",
+      "duration_ms": 1500,
+      "exit_code": 0,
+      "failed": 0,
+      "parsed": true,
+      "passed": 5,
+      "runner": "cargo",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": true,
+    "summary": "5 passed, 1 skipped (cargo test)"
+  },
+  "go_packages": {
+    "counts": {
+      "failed": 1,
+      "passed": 0,
+      "recognised": true,
+      "skipped": 0
+    },
+    "details": {
+      "command": "go test ./...",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 1,
+      "parsed": true,
+      "passed": 0,
+      "runner": "go",
+      "skipped": 0,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "0 passed, 1 failed, exit 1 (go test ./...)"
+  },
+  "go_packages_quiet": {
+    "counts": {
+      "failed": 1,
+      "passed": 2,
+      "recognised": true,
+      "skipped": 1,
+      "unit": "packages"
+    },
+    "details": {
+      "command": "go test ./...",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 1,
+      "parsed": true,
+      "passed": 2,
+      "runner": "go",
+      "skipped": 1,
+      "source": "shell",
+      "unit": "packages"
+    },
+    "ok": false,
+    "summary": "2 passed, 1 failed, 1 skipped packages, exit 1 (go test ./...)"
+  },
+  "go_verbose": {
+    "counts": {
+      "failed": 1,
+      "passed": 3,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "go test -v ./...",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 1,
+      "parsed": true,
+      "passed": 3,
+      "runner": "go",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "3 passed, 1 failed, 1 skipped, exit 1 (go test -v ./...)"
+  },
+  "jest": {
+    "counts": {
+      "failed": 1,
+      "passed": 7,
+      "recognised": true,
+      "skipped": 2
+    },
+    "details": {
+      "command": "npx jest",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 1,
+      "parsed": true,
+      "passed": 7,
+      "runner": "node",
+      "skipped": 2,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "7 passed, 1 failed, 2 skipped, exit 1 (npx jest)"
+  },
+  "nextest": {
+    "counts": {
+      "failed": 1,
+      "passed": 3,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "cargo nextest run",
+      "duration_ms": 1500,
+      "exit_code": 100,
+      "failed": 1,
+      "parsed": true,
+      "passed": 3,
+      "runner": "cargo",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "3 passed, 1 failed, 1 skipped, exit 100 (cargo nextest run)"
+  },
+  "pytest_failed": {
+    "counts": {
+      "failed": 2,
+      "passed": 9,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "pytest",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 2,
+      "parsed": true,
+      "passed": 9,
+      "runner": "pytest",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "9 passed, 2 failed, 1 skipped, exit 1 (pytest)"
+  },
+  "pytest_no_tests": {
+    "counts": {
+      "failed": 0,
+      "passed": 0,
+      "recognised": true,
+      "skipped": 0
+    },
+    "details": {
+      "command": "pytest tests/none",
+      "duration_ms": 1500,
+      "exit_code": 5,
+      "failed": 0,
+      "parsed": true,
+      "passed": 0,
+      "runner": "pytest",
+      "skipped": 0,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "0 passed, exit 5 (pytest tests/none)"
+  },
+  "pytest_ok": {
+    "counts": {
+      "failed": 0,
+      "passed": 8,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "uv run pytest",
+      "duration_ms": 1500,
+      "exit_code": 0,
+      "failed": 0,
+      "parsed": true,
+      "passed": 8,
+      "runner": "pytest",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": true,
+    "summary": "8 passed, 1 skipped (uv run pytest)"
+  },
+  "vitest_failed": {
+    "counts": {
+      "failed": 1,
+      "passed": 9,
+      "recognised": true,
+      "skipped": 0
+    },
+    "details": {
+      "command": "pnpm test",
+      "duration_ms": 1500,
+      "exit_code": 1,
+      "failed": 1,
+      "parsed": true,
+      "passed": 9,
+      "runner": "node",
+      "skipped": 0,
+      "source": "shell"
+    },
+    "ok": false,
+    "summary": "9 passed, 1 failed, exit 1 (pnpm test)"
+  },
+  "vitest_ok": {
+    "counts": {
+      "failed": 0,
+      "passed": 11,
+      "recognised": true,
+      "skipped": 1
+    },
+    "details": {
+      "command": "pnpm test",
+      "duration_ms": 1500,
+      "exit_code": 0,
+      "failed": 0,
+      "parsed": true,
+      "passed": 11,
+      "runner": "node",
+      "skipped": 1,
+      "source": "shell"
+    },
+    "ok": true,
+    "summary": "11 passed, 1 skipped (pnpm test)"
+  }
+}

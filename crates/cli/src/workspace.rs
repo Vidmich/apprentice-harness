@@ -1,10 +1,11 @@
-//! `harness workspace add | list | remove | info | refresh` (task M01-02).
+//! `harness workspace add | list | remove | info | refresh | init`
+//! (task M01-02; `init` is task M01-15).
 
 use std::path::PathBuf;
 
 use apprentice_api::methods::{
     Empty, WorkspaceAdd, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfo, WorkspaceInfoResult,
-    WorkspaceList, WorkspaceRefresh, WorkspaceRemove,
+    WorkspaceInit, WorkspaceInitParams, WorkspaceList, WorkspaceRefresh, WorkspaceRemove,
 };
 use apprentice_client::DaemonClient;
 use clap::{Args, Subcommand};
@@ -27,6 +28,17 @@ pub enum WorkspaceCommand {
     Info(IdOrDirArgs),
     /// Re-read `.harness/ignore` and rebuild the file index.
     Refresh(IdOrDirArgs),
+    /// Write the sample `.harness/HARNESS.md` (the mentor's instructions).
+    Init(InitArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    #[command(flatten)]
+    target: IdOrDirArgs,
+    /// Replace an existing HARNESS.md.
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Debug, Args)]
@@ -126,6 +138,24 @@ pub fn run(ctx: &Ctx, cmd: &WorkspaceCommand) -> anyhow::Result<()> {
                 Ok(c.call::<WorkspaceRefresh>(WorkspaceIdParams { id }).await?)
             })?;
             print_info(ctx, &r)?;
+        }
+        WorkspaceCommand::Init(a) => {
+            let target = target(&a.target)?;
+            let force = a.force;
+            let r = with_client(ctx, |c| async move {
+                let id = resolve_id(&c, target).await?;
+                Ok(c.call::<WorkspaceInit>(WorkspaceInitParams { id, force })
+                    .await?)
+            })?;
+            if ctx.out.json {
+                ctx.out.emit_json(&r)?;
+            } else {
+                ctx.out.info(format!(
+                    "{} {}; edit it, then `harness prompt show` to see what the mentor reads",
+                    if r.replaced { "replaced" } else { "wrote" },
+                    r.path
+                ));
+            }
         }
     }
     Ok(())

@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 
 use super::Workspace;
 use super::git::{GitError, Repo, Status, parse_status};
+use crate::outcomes::{Outcome, kind};
 use crate::trace::{AgentId, NewEvent, SessionId, kinds, sha256_hex};
 
 /// The diff blob keeps this much at most (head and tail around an
@@ -256,6 +257,31 @@ impl Snapshot {
         ev
     }
 
+    /// Whether `path` (workspace-relative, as listed) is in the index
+    /// of this snapshot.
+    pub fn contains(&self, path: &str) -> bool {
+        self.entries
+            .binary_search_by(|e| e.path.as_str().cmp(path))
+            .is_ok()
+    }
+
+    /// The git half's untracked paths.
+    pub fn untracked(&self) -> Vec<&str> {
+        self.git
+            .as_ref()
+            .map(|g| g.untracked.iter().map(|(p, _)| p.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The paths named in the git half's diff (`diff --git a/X b/X`).
+    pub fn diff_paths(&self) -> Vec<String> {
+        self.git
+            .as_ref()
+            .and_then(|g| g.diff.as_deref())
+            .map(diff_paths)
+            .unwrap_or_default()
+    }
+
     /// The indexed files that differ from `before` (an earlier snapshot
     /// of the same root): same path with another size or mtime is
     /// `changed`; the rest is `added` or `deleted`. Ignored files are
@@ -312,6 +338,15 @@ impl FilesChanged {
     /// The `outcome {kind: "files_changed"}` event. Lists are cut at
     /// [`SNAPSHOT_LIST_MAX`] each; the counts are always exact.
     pub fn event(&self, session: SessionId, agent: Option<AgentId>) -> NewEvent {
+        let mut ev = NewEvent::new(session, kinds::OUTCOME).payload(self.outcome().payload());
+        if let Some(agent) = agent {
+            ev = ev.agent(agent);
+        }
+        ev
+    }
+
+    /// The `files_changed` outcome (see [`Self::event`]).
+    pub fn outcome(&self) -> Outcome {
         let cut = |v: &[String]| {
             v.iter()
                 .take(SNAPSHOT_LIST_MAX)
@@ -334,15 +369,21 @@ impl FilesChanged {
         if truncated {
             details["truncated"] = json!(true);
         }
-        let mut ev = NewEvent::new(session, kinds::OUTCOME).payload(json!({
-            "kind": "files_changed",
-            "details": details,
-        }));
-        if let Some(agent) = agent {
-            ev = ev.agent(agent);
+        Outcome {
+            kind: kind::FILES_CHANGED,
+            details,
         }
-        ev
     }
+}
+
+/// The `b/` paths of every `diff --git a/X b/X` header in a unified
+/// diff, in order.
+pub fn diff_paths(diff: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(diff)
+        .lines()
+        .filter_map(|l| l.strip_prefix("diff --git a/"))
+        .filter_map(|rest| rest.rsplit_once(" b/").map(|(_, b)| b.to_owned()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -388,6 +429,19 @@ mod tests {
         assert_eq!(changes.deleted, ["d.rs"]);
         assert_eq!(changes.len(), 4);
         assert!(after.changes_since(&after).is_empty());
+        assert!(after.contains("c.rs"));
+        assert!(!after.contains("d.rs"));
+        assert_eq!(
+            diff_paths(
+                b"diff --git a/src/a.rs b/src/a.rs
+index 1..2
+--- a/src/a.rs
++++ b/src/a.rs
+diff --git a/x y b/x y
+"
+            ),
+            ["src/a.rs", "x y"]
+        );
         let ev = changes.event(SessionId::generate(), None);
         assert_eq!(ev.kind, kinds::OUTCOME);
         assert_eq!(ev.payload["kind"], "files_changed");

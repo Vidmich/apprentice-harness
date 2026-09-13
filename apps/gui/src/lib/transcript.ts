@@ -16,6 +16,7 @@ import {
   type AgentStatus,
   type AgentSummary,
   type EventNotification,
+  type OutcomeInfo,
   type RpcError,
   type SessionGetResult,
   type SessionInfo,
@@ -71,6 +72,8 @@ export interface AgentTurn {
   error?: RpcError;
   truncated?: boolean;
   notes: Note[];
+  /** The run's outcome signals (tests, files changed, marks, errors), oldest first. */
+  outcomes: OutcomeInfo[];
   /** Highest `seq` seen on its subscription, for debugging dropped events. */
   lastSeq: number;
 }
@@ -150,6 +153,7 @@ function turnFromSummary(a: AgentSummary, previous: AgentTurn | undefined): Agen
     calls: 0,
     usage: ZERO_USAGE,
     notes: [],
+    outcomes: [],
     lastSeq: 0,
   };
   const turn: AgentTurn = {
@@ -158,7 +162,10 @@ function turnFromSummary(a: AgentSummary, previous: AgentTurn | undefined): Agen
     status: base.status !== "running" && a.status === "running" ? base.status : a.status,
     calls: Math.max(base.calls, a.calls),
     usage: a.calls >= base.calls ? a.usage : base.usage,
+    // The stored rows are the truth; the live ones fill in until then.
+    outcomes: mergeOutcomes(a.outcomes ?? [], base.outcomes),
   };
+  if (a.error !== undefined && turn.error === undefined) turn.error = a.error;
   if (a.model !== undefined) turn.model = a.model;
   if (a.cost_usd !== undefined && a.calls >= base.calls) turn.costUsd = a.cost_usd;
   const started = parseTime(a.started_at);
@@ -207,6 +214,33 @@ export function mergeStored(
   return { ...next, live };
 }
 
+/** `stored` first, then whatever of `extra` it does not have (by event id). */
+function mergeOutcomes(stored: OutcomeInfo[], extra: OutcomeInfo[]): OutcomeInfo[] {
+  const seen = new Set(stored.map((o) => o.event_id));
+  return [...stored, ...extra.filter((o) => !seen.has(o.event_id))];
+}
+
+/** Adds an outcome to a run's turn (a live event, or the answer to `session.mark`). */
+export function addOutcome(t: Transcript, agentId: string, outcome: OutcomeInfo): Transcript {
+  return {
+    ...t,
+    agents: patchAgent(t, agentId, (turn) => ({
+      ...turn,
+      outcomes: mergeOutcomes(turn.outcomes, [outcome]),
+    })),
+  };
+}
+
+/** The user's verdict on a run, if one was recorded: the last accept/reject mark. */
+export function verdictOf(turn: AgentTurn): "accepted" | "rejected" | undefined {
+  for (let i = turn.outcomes.length - 1; i >= 0; i--) {
+    const kind = turn.outcomes[i]?.kind;
+    if (kind === "user_accept") return "accepted";
+    if (kind === "user_reject") return "rejected";
+  }
+  return undefined;
+}
+
 export function loadingTranscript(t: Transcript): Transcript {
   const next = { ...t, loading: true };
   delete next.loadError;
@@ -240,6 +274,7 @@ export function attachLive(
     calls: 0,
     usage: ZERO_USAGE,
     notes: [],
+    outcomes: [],
     lastSeq: 0,
     startedAt: now,
   };
@@ -298,6 +333,7 @@ function patchAgent(
     calls: 0,
     usage: ZERO_USAGE,
     notes: [],
+    outcomes: [],
     lastSeq: 0,
   };
   const next = typeof patch === "function" ? patch(turn) : { ...turn, ...patch };
@@ -434,6 +470,18 @@ export function applyEvent(t: Transcript, ev: EventNotification, now: number): T
           text: `waiting ${Math.ceil(e.wait_ms / 1000)} s for the mentor (${e.reason})`,
         }),
       };
+    case "agent.outcome": {
+      const outcome: OutcomeInfo = {
+        event_id: e.event_id,
+        kind: e.kind,
+        summary: e.summary,
+        details: e.details,
+        at: new Date(now).toISOString(),
+      };
+      if (e.ok !== undefined) outcome.ok = e.ok;
+      // A `reverted` names an earlier run: it lands on that run's footer.
+      return addOutcome(next, e.agent_id, outcome);
+    }
     case "agent.finished": {
       const agents = patchAgent(next, e.agent_id, (turn) => {
         const done: AgentTurn = { ...turn, status: e.status, endedAt: now };

@@ -194,9 +194,23 @@ impl TraceStore {
                     cache_creation_input_tokens: get_u64(r, 9)?,
                 },
                 cost_usd: (unpriced == 0).then(|| micros_to_usd(cost_micros)),
+                error: None,
+                outcomes: Vec::new(),
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut agents: Vec<AgentSummary> = rows.collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        drop(conn);
+        let mut signals = self.session_signals(session)?;
+        for a in &mut agents {
+            if let Some(s) = signals.remove(&a.id) {
+                a.outcomes = s.outcomes;
+                if a.status != "ok" {
+                    a.error = s.error;
+                }
+            }
+        }
+        Ok(agents)
     }
 
     /// Drops the rows above `keep` (a trailing assistant turn whose

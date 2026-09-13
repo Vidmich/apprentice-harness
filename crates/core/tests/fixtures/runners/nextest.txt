@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+    Starting 4 tests across 2 binaries (1 skipped)
+        PASS [   0.012s] demo tests::adds
+        PASS [   0.011s] demo tests::subtracts
+        FAIL [   0.020s] demo::integration end_to_end
+
+--- STDOUT:              demo::integration end_to_end ---
+thread 'end_to_end' panicked at tests\integration.rs:9:5:
+boom
+
+        PASS [   0.009s] demo::integration round_trip
+------------
+     Summary [   0.061s] 4 tests run: 3 passed, 1 failed, 1 skipped
+        FAIL [   0.020s] demo::integration end_to_end
+error: test run failed
+exit 100 · 0.3 s

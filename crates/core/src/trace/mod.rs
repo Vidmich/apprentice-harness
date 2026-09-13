@@ -14,6 +14,7 @@
 mod blobs;
 mod bundle;
 mod error;
+mod outcomes;
 mod payload;
 mod record;
 mod rpc;
@@ -29,6 +30,7 @@ use serde::{Deserialize, Serialize};
 pub use blobs::sha256_hex;
 pub use bundle::{ImportOutcome, ImportWrite};
 pub use error::TraceError;
+pub use outcomes::{AgentSignals, OutcomeFilter};
 pub use payload::{BLOB_REF_KEY, blob_refs};
 pub use record::StepRef;
 pub use rpc::TraceService;

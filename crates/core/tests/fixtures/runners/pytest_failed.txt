@@ -1,0 +1,20 @@
+============================= test session starts =============================
+platform linux -- Python 3.12.4, pytest-8.3.2, pluggy-1.5.0
+collected 12 items
+
+tests/test_bundle.py ..F.                                                [ 33%]
+tests/test_traces.py ..xX.E..                                            [100%]
+
+=================================== FAILURES ===================================
+__________________________ test_counts_match_manifest __________________________
+
+    def test_counts_match_manifest(bundle):
+>       assert bundle.counts() == bundle.manifest["counts"]
+E       AssertionError: assert {'events': 24} == {'events': 25}
+
+tests/test_bundle.py:41: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_bundle.py::test_counts_match_manifest - AssertionError
+ERROR tests/test_traces.py::test_stats - fixture 'db' not found
+====== 1 failed, 8 passed, 1 xfailed, 1 xpassed, 1 error, 2 warnings in 0.77s ======
+exit 1 · 1.3 s

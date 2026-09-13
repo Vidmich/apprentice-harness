@@ -102,6 +102,49 @@ export interface AgentSummary {
   usage: Usage;
   /** Cost of those calls; absent when one had no price. */
   cost_usd?: number;
+  /** How the run ended when not `ok` (the stored `agent.finished` error). */
+  error?: RpcError;
+  /** The run's `outcome` events, oldest first. */
+  outcomes?: OutcomeInfo[];
+}
+
+/** Kinds of `outcome` events. */
+export type OutcomeKind =
+  | "files_changed"
+  | "tests"
+  | "build"
+  | "user_accept"
+  | "user_reject"
+  | "task_done"
+  | "error"
+  | "reverted";
+
+/** One `outcome` event: what a run left behind, machine-readable. */
+export interface OutcomeInfo {
+  event_id: string;
+  kind: OutcomeKind | string;
+  /** One line: `12 passed (cargo test)`, `3 files (2 changed, 1 added)`. */
+  summary: string;
+  /** `true` for a pass / accept / done, `false` for a failure / reject / error / revert; absent without a verdict. */
+  ok?: boolean;
+  details: unknown;
+  at: string;
+}
+
+/** A user's verdict on a run (`session.mark`). */
+export type SessionMark = "accept" | "reject" | "done";
+
+export interface SessionMarkParams {
+  id: string;
+  mark: SessionMark;
+  note?: string;
+  /** Default: the session's last run. */
+  agent_id?: string;
+}
+
+export interface SessionMarkResult {
+  agent_id: string;
+  outcome: OutcomeInfo;
 }
 
 /** One stored message: the content blocks exactly as the mentor saw them. */
@@ -592,6 +635,9 @@ export interface TraceReplayCheckParams {
   session_id?: string;
   agent_id?: string;
   call_id?: string;
+  /** Calls started at or after this (the `stats` range grammar). */
+  since?: string;
+  until?: string;
   rebuild?: boolean;
 }
 
@@ -656,6 +702,29 @@ export interface StatsRepriceResult {
   examined: number;
   changed: number;
   unpriced: number;
+}
+
+export interface StatsOutcomesParams {
+  since?: string;
+  until?: string;
+  workspace_id?: string;
+}
+
+/** The outcome signals of the runs started in a range. */
+export interface OutcomeStats {
+  range: StatsRange;
+  /** Runs (main agents) started in the range. */
+  agents: number;
+  /** Runs with a `tests`, `user_accept`, `user_reject` or `task_done` outcome. */
+  labelled: number;
+  labelled_share: number;
+  by_kind?: Record<string, number>;
+  tests_passed: number;
+  tests_failed: number;
+  accepted: number;
+  rejected: number;
+  done: number;
+  errors?: Record<string, number>;
 }
 
 // ---------------------------------------------------------------- tools.*
@@ -792,6 +861,18 @@ export interface WorkspaceInfoResult extends WorkspaceSummary {
   config_overrides?: string[];
 }
 
+export interface WorkspaceInitParams {
+  id: string;
+  /** Replace an existing `HARNESS.md`. */
+  force?: boolean;
+}
+
+export interface WorkspaceInitResult {
+  /** The file written, absolute. */
+  path: string;
+  replaced?: boolean;
+}
+
 /** Every method: wire name → { params, result }. */
 export interface Methods {
   "daemon.hello": { params: HelloParams; result: HelloResult };
@@ -810,6 +891,7 @@ export interface Methods {
   "session.delete": { params: SessionDeleteParams; result: SessionDeleteResult };
   "session.rename": { params: SessionRenameParams; result: Empty };
   "session.export": { params: SessionIdParams; result: SessionExport };
+  "session.mark": { params: SessionMarkParams; result: SessionMarkResult };
   "agent.run": { params: AgentRunParams; result: AgentRunResult };
   "agent.cancel": { params: AgentIdParams; result: Empty };
   "agent.subscribe": { params: AgentIdParams; result: AgentSubscribeResult };
@@ -821,6 +903,7 @@ export interface Methods {
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
   "stats.calls": { params: StatsCallsParams; result: StatsCallsResult };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
+  "stats.outcomes": { params: StatsOutcomesParams; result: OutcomeStats };
   "tools.list": { params: ToolsListParams; result: ToolsListResult };
   "tools.rules": { params: ToolsRulesParams; result: ToolsRulesResult };
   "tools.allow": { params: ToolsRuleParams; result: ToolsRuleResult };
@@ -833,6 +916,7 @@ export interface Methods {
   "workspace.remove": { params: WorkspaceIdParams; result: WorkspaceRemoveResult };
   "workspace.info": { params: WorkspaceIdParams; result: WorkspaceInfoResult };
   "workspace.refresh": { params: WorkspaceIdParams; result: WorkspaceInfoResult };
+  "workspace.init": { params: WorkspaceInitParams; result: WorkspaceInitResult };
 }
 
 export type MethodName = keyof Methods;
@@ -859,6 +943,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "session.delete",
   "session.rename",
   "session.export",
+  "session.mark",
   "agent.run",
   "agent.cancel",
   "agent.subscribe",
@@ -870,6 +955,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "stats.tokens",
   "stats.calls",
   "stats.reprice",
+  "stats.outcomes",
   "tools.list",
   "tools.rules",
   "tools.allow",
@@ -882,6 +968,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "workspace.remove",
   "workspace.info",
   "workspace.refresh",
+  "workspace.init",
 ];
 
 // ---------------------------------------------------------------- events
@@ -937,6 +1024,16 @@ export type KnownEvent =
   | { type: "agent.warning"; agent_id: string; kind: string; message: string }
   /** The agent waits before calling again (`rate_limited`, `overloaded`); `until` is RFC 3339. */
   | { type: "agent.waiting"; agent_id: string; reason: string; until: string; wait_ms: number }
+  /** An `outcome` event was recorded for the run: a test or build result, the files changed, an error, a revert. */
+  | {
+      type: "agent.outcome";
+      agent_id: string;
+      event_id: string;
+      kind: OutcomeKind | string;
+      summary: string;
+      ok?: boolean;
+      details: unknown;
+    }
   | {
       type: "agent.finished";
       agent_id: string;
@@ -987,6 +1084,7 @@ export const KNOWN_EVENT_TYPES: readonly KnownEventType[] = [
   "agent.usage",
   "agent.warning",
   "agent.waiting",
+  "agent.outcome",
   "agent.finished",
   "permission.request",
   "permission.decision",
@@ -1066,6 +1164,8 @@ export function eventShapeError(event: Event): string | undefined {
       return first(str("agent_id"), str("call_id"), bool("ok"), str("summary"));
     case "agent.warning":
       return first(str("agent_id"), str("kind"), str("message"));
+    case "agent.outcome":
+      return first(str("agent_id"), str("event_id"), str("kind"), str("summary"));
     case "agent.waiting":
       if (typeof o.wait_ms !== "number") return "wait_ms must be a number";
       return first(str("agent_id"), str("reason"), str("until"));

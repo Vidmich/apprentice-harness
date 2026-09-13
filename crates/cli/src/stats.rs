@@ -5,10 +5,10 @@
 use std::fmt::Write as _;
 
 use apprentice_api::methods::{
-    StatsCalls, StatsCallsParams, StatsCallsResult, StatsReprice, StatsRepriceParams, StatsTokens,
-    StatsTokensParams,
+    StatsCalls, StatsCallsParams, StatsCallsResult, StatsOutcomes, StatsOutcomesParams,
+    StatsReprice, StatsRepriceParams, StatsTokens, StatsTokensParams,
 };
-use apprentice_api::types::{CallSummary, StatsGroup, TokenBucket, TokenStats};
+use apprentice_api::types::{CallSummary, OutcomeStats, StatsGroup, TokenBucket, TokenStats};
 use clap::{Args, Subcommand, ValueEnum};
 
 use crate::Ctx;
@@ -22,6 +22,21 @@ pub enum StatsCommand {
     Calls(CallsArgs),
     /// Recompute stored call costs from the current `[pricing]` config.
     Reprice(RepriceArgs),
+    /// Outcome signals of the runs in a range: how many are labelled.
+    Outcomes(OutcomesArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct OutcomesArgs {
+    /// Start of the range (an age, a date or an RFC 3339 timestamp).
+    #[arg(long, value_name = "WHEN")]
+    since: Option<String>,
+    /// End of the range (exclusive; a bare date includes that whole day).
+    #[arg(long, value_name = "WHEN")]
+    until: Option<String>,
+    /// Restrict to the sessions of one workspace (its registry id).
+    #[arg(long, value_name = "ID")]
+    workspace: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -156,6 +171,21 @@ pub fn run(ctx: &Ctx, cmd: &StatsCommand) -> anyhow::Result<()> {
                 print!("{}", format_calls(&r, a.offset));
             }
         }
+        StatsCommand::Outcomes(a) => {
+            let params = StatsOutcomesParams {
+                since: a.since.clone(),
+                until: a.until.clone(),
+                workspace_id: a.workspace.clone(),
+            };
+            let r = with_client(ctx, |c| async move {
+                Ok(c.call::<StatsOutcomes>(params).await?)
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&r)?);
+            } else {
+                print!("{}", format_outcome_stats(&r));
+            }
+        }
         StatsCommand::Reprice(a) => {
             let params = StatsRepriceParams {
                 model: a.model.clone(),
@@ -180,6 +210,50 @@ pub fn run(ctx: &Ctx, cmd: &StatsCommand) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Human output of `stats outcomes`: the range, the labelled share
+/// against the dogfooding target, then the counts per kind.
+pub fn format_outcome_stats(s: &OutcomeStats) -> String {
+    let mut out = String::new();
+    let since = s.range.since.as_deref().unwrap_or("beginning");
+    let until = s.range.until.as_deref().unwrap_or("now");
+    let _ = writeln!(out, "range {since} → {until}");
+    let _ = writeln!(
+        out,
+        "runs {} · labelled {} ({:.0}%; target ≥ 60%)",
+        s.agents,
+        s.labelled,
+        s.labelled_share * 100.0
+    );
+    let _ = writeln!(
+        out,
+        "tests passed {} · failed {} · accepted {} · rejected {} · done {}",
+        s.tests_passed, s.tests_failed, s.accepted, s.rejected, s.done
+    );
+    if !s.by_kind.is_empty() {
+        let _ = writeln!(
+            out,
+            "by kind: {}",
+            s.by_kind
+                .iter()
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+    }
+    if !s.errors.is_empty() {
+        let _ = writeln!(
+            out,
+            "errors: {}",
+            s.errors
+                .iter()
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+    }
+    out
 }
 
 /// Human output: a range line, one table per requested breakdown, and the
@@ -467,6 +541,52 @@ pub fn usd(v: f64) -> String {
         format!("${v:.4}")
     } else {
         format!("${v:.2}")
+    }
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use apprentice_api::types::{OutcomeStats, StatsRange};
+
+    use super::format_outcome_stats;
+
+    #[test]
+    fn outcome_stats_print_the_labelled_share_against_the_target() {
+        let s = OutcomeStats {
+            range: StatsRange {
+                since: Some("2026-09-06T00:00:00Z".into()),
+                until: None,
+            },
+            agents: 20,
+            labelled: 13,
+            labelled_share: 0.65,
+            by_kind: [("files_changed".to_owned(), 17), ("tests".to_owned(), 11)]
+                .into_iter()
+                .collect(),
+            tests_passed: 9,
+            tests_failed: 2,
+            accepted: 6,
+            rejected: 1,
+            done: 4,
+            errors: [("stalled".to_owned(), 1)].into_iter().collect(),
+        };
+        assert_eq!(
+            format_outcome_stats(&s),
+            [
+                "range 2026-09-06T00:00:00Z → now",
+                "runs 20 · labelled 13 (65%; target ≥ 60%)",
+                "tests passed 9 · failed 2 · accepted 6 · rejected 1 · done 4",
+                "by kind: files_changed 17 · tests 11",
+                "errors: stalled 1",
+                "",
+            ]
+            .join(
+                "
+"
+            )
+        );
+        let empty = OutcomeStats::default();
+        assert!(format_outcome_stats(&empty).contains("runs 0 · labelled 0 (0%"));
     }
 }
 

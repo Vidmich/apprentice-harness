@@ -562,7 +562,12 @@ async fn stats_methods_over_a_router_round_trip_through_serde() {
     Arc::clone(&svc).register(&mut router);
     assert_eq!(
         router.methods(),
-        vec!["stats.calls", "stats.reprice", "stats.tokens"]
+        vec![
+            "stats.calls",
+            "stats.outcomes",
+            "stats.reprice",
+            "stats.tokens"
+        ]
     );
 
     let (server_side, client_side) = tokio::io::duplex(1 << 16);

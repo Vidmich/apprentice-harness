@@ -22,6 +22,7 @@ crates/cli       harness           command line interface
 apps/gui         Tauri 2 + React + Vite + TypeScript desktop app
 ml/              Python (uv) training / evaluation workspace
 protocol/        mentor–apprentice prompt protocol versions (from M03)
+docs/            dogfood-m01.md — the daily/weekly checklist of the M01 trial
 ```
 
 ## Prerequisites

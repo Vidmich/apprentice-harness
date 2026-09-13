@@ -162,6 +162,20 @@ pub enum Event {
         kind: String,
         message: String,
     },
+    /// An `outcome` event was recorded for the run (task M01-15): a
+    /// test or build result parsed from a tool run, the files the run
+    /// changed, an error, a revert. `summary` is one line; `details`
+    /// the event payload's.
+    #[serde(rename = "agent.outcome")]
+    AgentOutcome {
+        agent_id: String,
+        event_id: String,
+        kind: String,
+        summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ok: Option<bool>,
+        details: Value,
+    },
     /// The agent is waiting before it calls the mentor again: `reason`
     /// is `rate_limited` or `overloaded`, `until` an RFC 3339 time.
     #[serde(rename = "agent.waiting")]

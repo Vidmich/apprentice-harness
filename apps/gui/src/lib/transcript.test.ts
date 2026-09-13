@@ -9,6 +9,7 @@ import type {
 import {
   type Item,
   type Transcript,
+  addOutcome,
   applyEvent,
   attachLive,
   cancellingLive,
@@ -20,6 +21,7 @@ import {
   mergeStored,
   promptOf,
   startLive,
+  verdictOf,
 } from "./transcript";
 
 const info: SessionInfo = {
@@ -537,5 +539,97 @@ describe("the live run", () => {
     );
     expect(t.agents.a2?.status).toBe("error");
     expect(t.agents.a2?.error?.message).toBe("boom");
+  });
+
+  it("keeps outcomes per run: live events, stored rows and marks, once each", () => {
+    let t = run();
+    // A `reverted` names the earlier run: it lands on that footer.
+    t = applyEvent(
+      t,
+      ev(
+        {
+          type: "agent.outcome",
+          agent_id: "a1",
+          event_id: "e_rev",
+          kind: "reverted",
+          summary: "1 file reverted",
+          ok: false,
+          details: { files: ["src/hello.rs"], at_agent: "a2" },
+        },
+        "a2",
+      ),
+      5,
+    );
+    t = applyEvent(
+      t,
+      ev(
+        {
+          type: "agent.outcome",
+          agent_id: "a2",
+          event_id: "e_tests",
+          kind: "tests",
+          summary: "3 passed (cargo test)",
+          ok: true,
+          details: { passed: 3 },
+        },
+        "a2",
+      ),
+      6,
+    );
+    expect(t.agents.a1?.outcomes.map((o) => o.kind)).toEqual(["reverted"]);
+    expect(t.agents.a2?.outcomes.map((o) => [o.kind, o.ok])).toEqual([["tests", true]]);
+    expect(verdictOf(t.agents.a2!)).toBeUndefined();
+    // The stored rows carry the same event (and one more); nothing doubles.
+    t = mergeStored(
+      t,
+      page([], {
+        agents: [
+          {
+            id: "a2",
+            status: "ok",
+            started_at: "2026-09-12T10:00:05.000Z",
+            calls: 1,
+            usage: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+            outcomes: [
+              {
+                event_id: "e_tests",
+                kind: "tests",
+                summary: "3 passed (cargo test)",
+                ok: true,
+                details: { passed: 3 },
+                at: "2026-09-12T10:00:06.000Z",
+              },
+              {
+                event_id: "e_files",
+                kind: "files_changed",
+                summary: "1 file added",
+                details: {},
+                at: "2026-09-12T10:00:07.000Z",
+              },
+            ],
+          },
+        ],
+      }),
+      "refresh",
+    );
+    expect(t.agents.a2?.outcomes.map((o) => o.event_id)).toEqual(["e_tests", "e_files"]);
+    // A mark answered by `session.mark`.
+    t = addOutcome(t, "a2", {
+      event_id: "e_mark",
+      kind: "user_reject",
+      summary: "rejected: wrong file",
+      ok: false,
+      details: { note: "wrong file" },
+      at: "2026-09-12T10:01:00.000Z",
+    });
+    expect(verdictOf(t.agents.a2!)).toBe("rejected");
+    expect(t.agents.a2?.outcomes).toHaveLength(3);
+    const footer = deriveItems(t).find((i) => i.kind === "turn_footer" && i.agentId === "a2");
+    expect(footer?.kind === "turn_footer" && footer.turn.outcomes.length).toBe(3);
   });
 });

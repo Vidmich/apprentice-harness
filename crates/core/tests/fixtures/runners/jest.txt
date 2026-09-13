@@ -1,0 +1,12 @@
+ PASS  src/sum.test.js
+ FAIL  src/parse.test.js
+  ● parse › handles empty input
+
+    expect(received).toEqual(expected)
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       1 failed, 2 skipped, 7 passed, 10 total
+Snapshots:   0 total
+Time:        1.234 s
+Ran all test suites.
+exit 1 · 2.2 s

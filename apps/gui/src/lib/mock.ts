@@ -22,6 +22,7 @@ import type {
   CallSummary,
   EventNotification,
   EventSummary,
+  OutcomeInfo,
   RpcError,
   RuleInfo,
   RuleSpec,
@@ -192,6 +193,8 @@ export function mockBackend(): Backend {
   const trace = new Map<string, { event: TraceEvent; blob?: string }>();
   const listeners = new Map<string, Set<EventHandler<unknown>>>();
   const workspaces = new Map<string, WorkspaceSummary>();
+  /** Workspaces whose `HARNESS.md` was written (`workspace.init`); the rest have none. */
+  const instructions = new Set<string>();
   /** Every mentor call, oldest first. */
   const calls: CallSummary[] = [];
   const asks = new Map<string, Ask>();
@@ -551,6 +554,36 @@ export function mockBackend(): Backend {
     }
   }
 
+  /** Records an `outcome` event on a run and, when it is live, sends `agent.outcome`. */
+  function outcome(
+    s: Session,
+    turn: AgentSummary,
+    run: Run | undefined,
+    kind: string,
+    summary: string,
+    ok: boolean | undefined,
+    details: unknown,
+  ): OutcomeInfo {
+    const eventId = record(s, turn.id, "outcome", { kind, details });
+    const info: OutcomeInfo = { event_id: eventId, kind, summary, details, at: now() };
+    if (ok !== undefined) info.ok = ok;
+    turn.outcomes = [...(turn.outcomes ?? []), info];
+    if (run !== undefined) {
+      const ev: Record<string, unknown> = {
+        type: "agent.outcome",
+        agent_id: turn.id,
+        event_id: eventId,
+        kind,
+        summary,
+        details,
+      };
+      if (ok !== undefined) ev.ok = ok;
+      send(run, ev);
+    }
+    save();
+    return info;
+  }
+
   /**
    * The canned run. `done` assistant rows of the agent exist already
    * (a run resumed after a reload): those steps are skipped.
@@ -859,6 +892,17 @@ export function mockBackend(): Backend {
         a,
         "st2",
       );
+      outcome(s, turn, run, "tests", `${lines} passed (cargo test)`, true, {
+        runner: "cargo",
+        passed: lines,
+        failed: 0,
+        skipped: 0,
+        exit_code: 0,
+        duration_ms: 1234,
+        command: shell.command,
+        source: "shell",
+        parsed: true,
+      });
     }
 
     // Step 3: the answer.
@@ -875,6 +919,14 @@ export function mockBackend(): Backend {
     usage(2600, 400);
     if (run.cancelled) return finish("cancelled");
     push(s, "assistant", [{ type: "text", text: ANSWER }], a, "st3");
+    if (!prompt.includes("fail")) {
+      outcome(s, turn, run, "files_changed", "1 file changed", undefined, {
+        changed: ["src/main.rs"],
+        added: [],
+        deleted: [],
+        counts: { changed: 1, added: 0, deleted: 0 },
+      });
+    }
     finish("ok");
     // The cheap model names the session a moment later: a mentor call too.
     setTimeout(() => {
@@ -1174,6 +1226,17 @@ export function mockBackend(): Backend {
         return { sessions_unlinked: unlinked };
       }
       case "workspace.info":
+      case "workspace.init": {
+        const w = workspaceOf(params.id);
+        const path = `${w.root}/.harness/HARNESS.md`;
+        const replaced = instructions.has(w.id);
+        if (replaced && params.force !== true) {
+          throw rpcError(-32009, "conflict", `${path} exists; pass force to replace it`);
+        }
+        instructions.add(w.id);
+        save();
+        return replaced ? { path, replaced: true } : { path };
+      }
       case "workspace.refresh": {
         const w = workspaceOf(params.id);
         return {
@@ -1183,7 +1246,7 @@ export function mockBackend(): Backend {
           git_head: "0123456789abcdef0123456789abcdef01234567",
           git_branch: "main",
           git_dirty: w.name.length % 2 === 0,
-          has_instructions: true,
+          has_instructions: instructions.has(w.id),
           has_config: Object.keys(workspaceConfig[w.root] ?? {}).length > 0,
           has_ignore_file: false,
           config_overrides: Object.keys(workspaceConfig[w.root] ?? {}),
@@ -1252,6 +1315,80 @@ export function mockBackend(): Backend {
         s.info.title_source = "user";
         save();
         return {};
+      }
+      case "session.mark": {
+        const s = session(params.id);
+        const wanted = typeof params.agent_id === "string" ? params.agent_id : undefined;
+        const turn =
+          wanted === undefined
+            ? s.agents[s.agents.length - 1]
+            : s.agents.find((a) => a.id === wanted);
+        if (turn === undefined) {
+          throw wanted === undefined
+            ? rpcError(-32004, "not_found", `session ${s.info.id} has no run to mark`)
+            : rpcError(-32602, "invalid_params", `agent ${wanted} is not a run of the session`);
+        }
+        const mark = String(params.mark);
+        const kind =
+          mark === "accept" ? "user_accept" : mark === "reject" ? "user_reject" : "task_done";
+        const word = mark === "accept" ? "accepted" : mark === "reject" ? "rejected" : "task done";
+        const note = typeof params.note === "string" ? params.note.trim() : "";
+        const details: Record<string, unknown> = {};
+        if (note !== "") details.note = note;
+        const info = outcome(
+          s,
+          turn,
+          runs.get(turn.id),
+          kind,
+          note === "" ? word : `${word}: ${note}`,
+          mark !== "reject",
+          details,
+        );
+        return { agent_id: turn.id, outcome: info };
+      }
+      case "stats.outcomes": {
+        const byKind: Record<string, number> = {};
+        let agents = 0;
+        let labelled = 0;
+        let passed = 0;
+        let failed = 0;
+        let accepted = 0;
+        let rejected = 0;
+        let done = 0;
+        for (const s of sessions.values()) {
+          for (const a of s.agents) {
+            agents += 1;
+            const kinds = new Set((a.outcomes ?? []).map((o) => o.kind));
+            for (const k of kinds) byKind[k] = (byKind[k] ?? 0) + 1;
+            if (["tests", "user_accept", "user_reject", "task_done"].some((k) => kinds.has(k))) {
+              labelled += 1;
+            }
+            const tests = [...(a.outcomes ?? [])].reverse().find((o) => o.kind === "tests");
+            if (tests !== undefined) {
+              if (tests.ok === true) passed += 1;
+              else failed += 1;
+            }
+            if (kinds.has("user_accept")) accepted += 1;
+            if (kinds.has("user_reject")) rejected += 1;
+            if (kinds.has("task_done")) done += 1;
+          }
+        }
+        return {
+          range: {
+            since: typeof params.since === "string" ? params.since : null,
+            until: typeof params.until === "string" ? params.until : null,
+          },
+          agents,
+          labelled,
+          labelled_share: agents === 0 ? 0 : Math.round((labelled / agents) * 1000) / 1000,
+          by_kind: byKind,
+          tests_passed: passed,
+          tests_failed: failed,
+          accepted,
+          rejected,
+          done,
+          errors: {},
+        };
       }
       case "session.archive": {
         const s = session(params.id);

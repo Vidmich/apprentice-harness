@@ -1,0 +1,17 @@
+
+> apprentice-harness-gui@0.1.0 test C:\src\apps\gui
+> vitest run
+
+
+ RUN  v2.1.1 C:/src/apps/gui
+
+ ✓ src/lib/format.test.ts (6 tests) 12ms
+ ✓ src/lib/api.test.ts (4 tests) 41ms
+ ↓ src/lib/diff.test.ts (2 tests | 1 skipped)
+
+ Test Files  3 passed (3)
+      Tests  11 passed | 1 skipped (12)
+   Start at  10:41:02
+   Duration  1.02s (transform 210ms, setup 0ms, collect 380ms, tests 53ms)
+
+exit 0 · 2.0 s

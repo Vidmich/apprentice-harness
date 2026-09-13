@@ -1,0 +1,15 @@
+ RUN  v2.1.1 C:/src/apps/gui
+
+ ❯ src/lib/api.test.ts (4 tests | 1 failed) 44ms
+   × reads the bundle shapes
+     → expected 39 to be 42
+ ✓ src/lib/format.test.ts (6 tests) 10ms
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 9 passed (10)
+   Start at  10:44:12
+   Duration  0.98s
+
+[err]
+ ELIFECYCLE  Test failed. See above for more details.
+exit 1 · 1.9 s

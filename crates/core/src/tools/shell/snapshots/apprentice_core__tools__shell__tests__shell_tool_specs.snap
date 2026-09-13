@@ -89,5 +89,52 @@ expression: specs
       "shell"
     ],
     "timeout_s": 660
+  },
+  {
+    "name": "run_tests",
+    "description": "Runs the workspace's tests and reports the parsed result.\n\nWithout `command`, the test runner is detected from the files in `cwd` (default: the workspace root): `Cargo.toml` → `cargo test`, `package.json` with a `test` script → `pnpm test` (`npm`/`yarn` by lockfile), `pyproject.toml` → `uv run pytest` (or `pytest`), `go.mod` → `go test ./...`. The result says which command ran. Pass `command` to run something else (`cargo test -p core --test loop`, `pytest tests/test_x.py -x`); `runner` names the parser when the command does not make it obvious.\n\nThe output is the command's transcript, as `shell` returns it, with one line on top: `[tests] <passed> passed, <failed> failed, <skipped> skipped (<command> · exit <code> · <duration>)` — or `[tests] no summary recognised` when the output has none the parser knows (a compile error, an unknown runner), in which case the exit code is the verdict. The counts are recorded as the run's outcome.\n\nPrefer this over `shell` for running tests: the parsed result is what the user sees at a glance.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "The test command to run instead of the detected one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "cwd": {
+          "description": "Directory to run in, relative to the workspace root (default: the root).",
+          "type": "string"
+        },
+        "description": {
+          "description": "One line for the user saying what is being checked.",
+          "maxLength": 200,
+          "type": "string"
+        },
+        "runner": {
+          "description": "Which parser reads the output (default: from the command).",
+          "enum": [
+            "cargo",
+            "pytest",
+            "node",
+            "go"
+          ],
+          "type": "string"
+        },
+        "timeout_s": {
+          "default": 600,
+          "description": "Seconds before the run and its process tree are killed.",
+          "maximum": 3600,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "risk": "execute",
+    "tags": [
+      "shell",
+      "tests"
+    ],
+    "timeout_s": 3660
   }
 ]

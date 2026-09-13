@@ -140,6 +140,85 @@ pub struct AgentSummary {
     /// Cost of those calls; absent when one had no price.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// How the run ended when it did not end `ok` (task M01-15: the
+    /// stored `agent.finished` error, so a reload shows it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<crate::jsonrpc::RpcError>,
+    /// The `outcome` events of the run, oldest first (task M01-15).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outcomes: Vec<OutcomeInfo>,
+}
+
+/// One `outcome` event as clients see it (task M01-15): what a run
+/// left behind, machine-readable, without reading the transcript.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutcomeInfo {
+    pub event_id: String,
+    /// `files_changed` | `tests` | `build` | `user_accept` |
+    /// `user_reject` | `task_done` | `error` | `reverted`.
+    pub kind: String,
+    /// One line: `12 passed (cargo test)`, `3 files changed`,
+    /// `accepted`.
+    pub summary: String,
+    /// `true` for a passing test run, a successful build, an accept or
+    /// a done mark; `false` for a failing run, a reject, an error or a
+    /// revert; absent where the kind carries no verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// The event payload's `details`, as recorded.
+    pub details: Value,
+    pub at: String,
+}
+
+/// A user's verdict on a run (`session.mark`, task M01-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMark {
+    /// The run's result was accepted (`outcome.user_accept`).
+    Accept,
+    /// The run's result was rejected (`outcome.user_reject`).
+    Reject,
+    /// The session's task is complete (`outcome.task_done`).
+    Done,
+}
+
+impl SessionMark {
+    /// The `kind` of the outcome event the mark records.
+    pub fn outcome_kind(self) -> &'static str {
+        match self {
+            Self::Accept => "user_accept",
+            Self::Reject => "user_reject",
+            Self::Done => "task_done",
+        }
+    }
+}
+
+/// `stats.outcomes` (task M01-15): how many runs of a range carry
+/// which outcome signals, for the dogfooding checklist's labelled
+/// share.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct OutcomeStats {
+    pub range: StatsRange,
+    /// Runs (main agents) started in the range.
+    pub agents: u64,
+    /// Runs with a `tests`, `user_accept`, `user_reject` or
+    /// `task_done` outcome: the ones a later milestone can label
+    /// without a judge.
+    pub labelled: u64,
+    /// `labelled / agents`, 0 without runs.
+    pub labelled_share: f64,
+    /// Runs carrying each outcome kind at least once.
+    #[serde(default)]
+    pub by_kind: std::collections::BTreeMap<String, u64>,
+    /// Runs whose last `tests` outcome passed / failed.
+    pub tests_passed: u64,
+    pub tests_failed: u64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub done: u64,
+    /// Runs with an `error` outcome, by its `details.kind`.
+    #[serde(default)]
+    pub errors: std::collections::BTreeMap<String, u64>,
 }
 
 /// One stored message of a conversation: the content blocks exactly as

@@ -1,6 +1,7 @@
 //! The shell tools (task M01-05): `shell` runs a command in the
 //! workspace, `shell_jobs` looks after the ones started in the
-//! background.
+//! background; `run_tests` ([`run_tests`], task M01-15) runs the test
+//! suite through the same machinery and parses the result.
 //!
 //! A command runs through PowerShell (`pwsh`, else `powershell`) on
 //! Windows and through `$SHELL -lc` (else `/bin/sh`) elsewhere —
@@ -23,6 +24,7 @@ pub(crate) mod capture;
 mod jobs;
 mod process;
 mod program;
+mod run_tests;
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +40,7 @@ use self::capture::{Reporter, Transcript};
 use self::jobs::{Job, Jobs, NewJob};
 use self::process::{Ended, Outcome, spawn};
 use self::program::Program;
+pub use self::run_tests::{RUN_TESTS_DEFAULT_TIMEOUT_S, RunTests};
 use super::file::{parse, target};
 use super::{ProgressStream, Risk, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
 use crate::config::ShellConfig;
@@ -60,7 +63,8 @@ pub fn shell_name(config: &ShellConfig) -> String {
     Program::resolve(config).name
 }
 
-/// The two shell tools, sharing one job registry.
+/// The shell tools: `shell` and `shell_jobs` sharing one job registry,
+/// and `run_tests`.
 pub fn shell_tools() -> Vec<Arc<dyn Tool>> {
     let jobs = Arc::new(Jobs::default());
     vec![
@@ -68,6 +72,7 @@ pub fn shell_tools() -> Vec<Arc<dyn Tool>> {
             jobs: Arc::clone(&jobs),
         }),
         Arc::new(ShellJobs { jobs }),
+        Arc::new(RunTests),
     ]
 }
 

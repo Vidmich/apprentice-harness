@@ -1,12 +1,14 @@
 //! `workspace.*` over the registry: `add`, `list`, `remove`, `info`,
-//! `refresh`. Index builds run on the blocking pool.
+//! `refresh`, and `init` (task M01-15: the sample `HARNESS.md`). Index
+//! builds run on the blocking pool.
 
 use std::sync::Arc;
 
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
     Empty, WorkspaceAdd, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfo, WorkspaceInfoResult,
-    WorkspaceList, WorkspaceListResult, WorkspaceRefresh, WorkspaceRemove, WorkspaceRemoveResult,
+    WorkspaceInit, WorkspaceInitParams, WorkspaceInitResult, WorkspaceList, WorkspaceListResult,
+    WorkspaceRefresh, WorkspaceRemove, WorkspaceRemoveResult,
 };
 use apprentice_api::server::{Connection, Router};
 use apprentice_api::types::{ConfigSource, WorkspaceSummary};
@@ -120,7 +122,42 @@ impl WorkspaceService {
         })
     }
 
+    /// `workspace.init`: writes [`HARNESS_MD_TEMPLATE`] as the
+    /// workspace's `.harness/HARNESS.md`.
+    ///
+    /// # Errors
+    /// Not found; `conflict` when the file exists and `force` is off;
+    /// an I/O failure.
+    pub fn init(&self, p: &WorkspaceInitParams) -> Result<WorkspaceInitResult, RpcError> {
+        let ws = self.workspaces.get(&WorkspaceId::from(p.id.as_str()))?;
+        let path = ws.instructions_file();
+        let replaced = path.is_file();
+        if replaced && !p.force {
+            return Err(RpcError::conflict(format!(
+                "{} exists; pass `force` to replace it",
+                path.display()
+            )));
+        }
+        let io = |what: &str, e: std::io::Error| {
+            RpcError::internal(format!("{what} {}: {e}", path.display()))
+        };
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| io("creating the directory of", e))?;
+        }
+        std::fs::write(&path, harness_md_template(ws.name())).map_err(|e| io("writing", e))?;
+        tracing::info!(path = %path.display(), replaced, "wrote the HARNESS.md template");
+        Ok(WorkspaceInitResult {
+            path: path.to_string_lossy().into_owned(),
+            replaced,
+        })
+    }
+
     pub fn register(self: Arc<Self>, router: &mut Router) {
+        let svc = Arc::clone(&self);
+        router.add::<WorkspaceInit, _, _>(move |_c: Arc<Connection>, p: WorkspaceInitParams| {
+            let svc = Arc::clone(&svc);
+            async move { svc.init(&p) }
+        });
         let svc = Arc::clone(&self);
         router.add::<WorkspaceAdd, _, _>(move |_c: Arc<Connection>, p: WorkspaceAddParams| {
             let svc = Arc::clone(&svc);
@@ -147,6 +184,42 @@ impl WorkspaceService {
             async move { svc.info(&p, true).await }
         });
     }
+}
+
+/// The sample `.harness/HARNESS.md` (task M01-15): what the mentor
+/// reads at every run, with the sections worth filling in.
+pub const HARNESS_MD_TEMPLATE: &str = "\
+# {name}
+
+Instructions for the mentor. This file is read at the start of every
+run in this workspace (see `harness prompt show`); keep it short and
+concrete — it costs tokens on every call.
+
+## What this project is
+
+One paragraph: what the code does, who uses it, what matters most.
+
+## How to work here
+
+- Build: `...`
+- Test: `...` (the `run_tests` tool detects the runner; name the
+  command here when it is not the obvious one)
+- Lint / format: `...`
+
+## Conventions
+
+- Style rules the code follows that a reader would not guess.
+- Where new code goes; what not to touch.
+
+## Pitfalls
+
+- Things that look wrong but are deliberate.
+- Slow or flaky commands to avoid.
+";
+
+/// The template with the workspace's name filled in.
+pub fn harness_md_template(name: &str) -> String {
+    HARNESS_MD_TEMPLATE.replacen("{name}", name, 1)
 }
 
 /// Dotted keys the workspace's `.harness/config.toml` sets.

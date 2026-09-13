@@ -94,7 +94,12 @@ fn run(args: &Args) -> anyhow::Result<ExitCode> {
         &telemetry::Options::new("daemon", level, paths.data_dir.join("logs"))
             .stderr(args.foreground || args.stdio),
     )?;
-    telemetry::install_panic_hook();
+    telemetry::install_panic_hook_with(|| {
+        format!(
+            "last rpc method: {}",
+            apprentice_api::server::last_method().unwrap_or_else(|| "none".to_owned())
+        )
+    });
 
     tracing::info!(
         version = apprentice_core::VERSION,

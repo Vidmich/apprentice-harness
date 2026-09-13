@@ -12,6 +12,7 @@ import {
   type EventNotification,
   type HelloResult,
   KNOWN_EVENT_TYPES,
+  type OutcomeStats,
   type PromptShowParams,
   type PromptShowResult,
   type ReplayReport,
@@ -21,10 +22,13 @@ import {
   type SessionGetResult,
   type SessionListParams,
   type SessionListResult,
+  type SessionMarkParams,
+  type SessionMarkResult,
   type SessionSearchParams,
   type SessionSearchResult,
   type StatsCallsParams,
   type StatsCallsResult,
+  type StatsOutcomesParams,
   type StatsTokensParams,
   type TokenStats,
   type ToolsListResult,
@@ -35,6 +39,8 @@ import {
   type TraceReplayCheckParams,
   type WorkspaceAddParams,
   type WorkspaceInfoResult,
+  type WorkspaceInitParams,
+  type WorkspaceInitResult,
   type WorkspaceSummary,
   asKnown,
   eventShapeError,
@@ -185,6 +191,35 @@ describe("api.ts against the Rust snapshots", () => {
     expect(report.calls[1]?.problems?.[0]).toContain("hashes to");
   });
 
+  it("reads outcomes: a run's signals, a mark, the stats", () => {
+    const [, page] = snapshot("session_get") as [SessionGetParams, SessionGetResult];
+    const agent = page.agents?.[0];
+    expect(agent?.outcomes?.map((o) => [o.kind, o.ok])).toEqual([
+      ["tests", true],
+      ["files_changed", undefined],
+    ]);
+    expect(agent?.outcomes?.[0]?.summary).toBe("12 passed (cargo test)");
+    expect(agent?.error).toBeUndefined();
+    const [params, marked] = snapshot("session_mark") as [SessionMarkParams, SessionMarkResult];
+    expect(params.mark).toBe("accept");
+    expect(marked.outcome.kind).toBe("user_accept");
+    expect(marked.outcome.ok).toBe(true);
+    const [range, stats] = snapshot("stats_outcomes") as [StatsOutcomesParams, OutcomeStats];
+    expect(range.since).toBe("7d");
+    expect(stats.labelled_share).toBe(0.65);
+    expect(stats.by_kind?.tests).toBe(11);
+    expect(stats.errors?.stalled).toBe(1);
+    const [init, written] = snapshot("workspace_init") as [
+      WorkspaceInitParams,
+      WorkspaceInitResult,
+    ];
+    expect(init.force).toBeUndefined();
+    expect(written.path.endsWith("HARNESS.md")).toBe(true);
+    const events = snapshot("events") as EventNotification[];
+    const outcome = events.map((n) => asKnown(n.event)).find((e) => e?.type === "agent.outcome");
+    expect(outcome?.type === "agent.outcome" && outcome.ok).toBe(false);
+  });
+
   it("reads workspace info", () => {
     const info = snapshot("workspace_info") as WorkspaceInfoResult;
     expect(info.file_count).toBe(1234);
@@ -214,7 +249,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(39);
+    expect(ALL_METHODS.length).toBe(42);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

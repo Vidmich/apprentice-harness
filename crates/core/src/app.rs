@@ -107,6 +107,16 @@ impl AppState {
     pub fn open_with(loader: ConfigLoader, config: &Config) -> Result<Arc<Self>, AppError> {
         let paths = loader.paths();
         let store = Arc::new(TraceStore::open_with(paths, &config.trace)?);
+        // Agents a previous daemon left `running` end here, as errors:
+        // their sessions can be resumed and their runs are labelled.
+        match store.recover_orphaned_agents() {
+            Ok(orphans) if orphans.is_empty() => {}
+            Ok(orphans) => tracing::warn!(
+                agents = ?orphans.iter().map(|(a, _)| a.to_string()).collect::<Vec<_>>(),
+                "ended agents left running by a previous daemon (daemon_restart)"
+            ),
+            Err(e) => tracing::error!(error = %e, "cannot recover agents left running"),
+        }
         let writer = TraceWriter::spawn(Arc::clone(&store));
         let secrets = secret_store(paths, config.daemon.secret_store);
         let workspaces = Arc::new(Workspaces::new(Arc::clone(&store)));
@@ -367,6 +377,7 @@ mod tests {
                 "grep",
                 "list_dir",
                 "read_file",
+                "run_tests",
                 "shell",
                 "shell_jobs",
                 "write_file"
@@ -464,9 +475,11 @@ mod tests {
                 "session.export",
                 "session.get",
                 "session.list",
+                "session.mark",
                 "session.rename",
                 "session.search",
                 "stats.calls",
+                "stats.outcomes",
                 "stats.reprice",
                 "stats.tokens",
                 "tools.allow",
@@ -481,6 +494,7 @@ mod tests {
                 "trace.replay_check",
                 "workspace.add",
                 "workspace.info",
+                "workspace.init",
                 "workspace.list",
                 "workspace.refresh",
                 "workspace.remove",

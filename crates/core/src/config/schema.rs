@@ -72,6 +72,12 @@ pub struct RuntimeConfig {
     /// Longest wait, in seconds, for a rate limit or an overload to
     /// pass (beyond the adapter's own retries) before the run fails.
     pub max_wait_s: u64,
+    /// The stalled-agent watchdog (task M01-15): a run that produces
+    /// no event for the longest configured wait (`mentor.timeout_s`,
+    /// `tools.timeout_s.execute`, `permissions.ask_timeout_s`) plus
+    /// this many seconds is ended with `error: stalled`. `0` turns the
+    /// watchdog off.
+    pub stall_grace_s: u64,
 }
 
 impl Default for RuntimeConfig {
@@ -79,6 +85,7 @@ impl Default for RuntimeConfig {
         Self {
             max_iterations: 200,
             max_wait_s: 300,
+            stall_grace_s: 60,
         }
     }
 }

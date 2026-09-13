@@ -1,5 +1,6 @@
 //! `harness session new | list | show | search | rename | archive |
-//! delete | export` (task M01-10 added everything after `list`).
+//! delete | export | mark` (task M01-10 added everything after `list`;
+//! `mark` is task M01-15).
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -8,11 +9,11 @@ use anyhow::Context as _;
 use apprentice_api::methods::{
     SessionArchive, SessionArchiveParams, SessionCreate, SessionCreateParams, SessionDelete,
     SessionDeleteParams, SessionExportMethod, SessionGet, SessionGetParams, SessionIdParams,
-    SessionList, SessionListParams, SessionRename, SessionRenameParams, SessionSearch,
-    SessionSearchParams,
+    SessionList, SessionListParams, SessionMarkMethod, SessionMarkParams, SessionRename,
+    SessionRenameParams, SessionSearch, SessionSearchParams,
 };
-use apprentice_api::types::{SessionMessage, SessionSummary};
-use clap::{Args, Subcommand};
+use apprentice_api::types::{AgentSummary, SessionMark, SessionMessage, SessionSummary};
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
 
 use crate::Ctx;
@@ -38,6 +39,42 @@ pub enum SessionCommand {
     Delete(DeleteArgs),
     /// Write a session as one JSON document.
     Export(ExportArgs),
+    /// Record your verdict on the last run: accept, reject, or task done.
+    Mark(MarkArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Mark {
+    /// The run's result is good (`outcome.user_accept`).
+    Accept,
+    /// The run's result is not (`outcome.user_reject`).
+    Reject,
+    /// The session's task is complete (`outcome.task_done`).
+    Done,
+}
+
+impl From<Mark> for SessionMark {
+    fn from(m: Mark) -> Self {
+        match m {
+            Mark::Accept => Self::Accept,
+            Mark::Reject => Self::Reject,
+            Mark::Done => Self::Done,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct MarkArgs {
+    id: String,
+    /// The verdict.
+    #[arg(value_enum)]
+    mark: Mark,
+    /// A word on why.
+    #[arg(long, value_name = "TEXT")]
+    note: Option<String>,
+    /// The run to mark (default: the session's last).
+    #[arg(long, value_name = "ID")]
+    agent: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -204,6 +241,25 @@ pub fn run(ctx: &Ctx, cmd: &SessionCommand) -> anyhow::Result<()> {
                 ));
             }
         }
+        SessionCommand::Mark(a) => {
+            let params = SessionMarkParams {
+                id: a.id.clone(),
+                mark: a.mark.into(),
+                note: a.note.clone(),
+                agent_id: a.agent.clone(),
+            };
+            let r = with_client(ctx, |c| async move {
+                Ok(c.call::<SessionMarkMethod>(params).await?)
+            })?;
+            if ctx.out.json {
+                ctx.out.emit_json(&r)?;
+            } else {
+                ctx.out.info(format!(
+                    "{} · run {} of {}: {}",
+                    r.outcome.kind, r.agent_id, a.id, r.outcome.summary
+                ));
+            }
+        }
         SessionCommand::Export(a) => {
             let params = SessionIdParams { id: a.id.clone() };
             let r = with_client(ctx, |c| async move {
@@ -321,6 +377,9 @@ fn show(ctx: &Ctx, a: &ShowArgs) -> anyhow::Result<()> {
         facts.push(("prompt", v.clone()));
     }
     ctx.out.print_kv(&facts);
+    if let Some(line) = outcomes_line(&r.agents) {
+        ctx.out.line(ctx.out.dim(&line));
+    }
     for m in &r.messages {
         ctx.out.line("");
         ctx.out.line(ctx.out.dim(&format!(
@@ -340,6 +399,27 @@ fn show(ctx: &Ctx, a: &ShowArgs) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// One line per run with outcomes: `run a1: 12 passed (cargo test) ·
+/// 3 files (2 changed, 1 added) · accepted`.
+pub fn outcomes_line(agents: &[AgentSummary]) -> Option<String> {
+    let lines: Vec<String> = agents
+        .iter()
+        .filter(|a| !a.outcomes.is_empty())
+        .map(|a| {
+            format!(
+                "run {}: {}",
+                a.id,
+                a.outcomes
+                    .iter()
+                    .map(|o| o.summary.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            )
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// The blocks of a message as text: text as is, tool calls as
@@ -508,5 +588,43 @@ mod tests {
             "← t1: fn main() {} \n← error t2: nope\n"
         );
         assert_eq!(cut(&"x".repeat(5), 3), "xxx…");
+    }
+
+    #[test]
+    fn runs_with_outcomes_get_one_line_each() {
+        use apprentice_api::types::{AgentSummary, OutcomeInfo, Usage};
+        let agent = |id: &str, outcomes: Vec<&str>| AgentSummary {
+            id: id.into(),
+            status: "ok".into(),
+            started_at: String::new(),
+            ended_at: None,
+            model: None,
+            calls: 1,
+            usage: Usage::default(),
+            cost_usd: None,
+            error: None,
+            outcomes: outcomes
+                .into_iter()
+                .map(|s| OutcomeInfo {
+                    event_id: "e".into(),
+                    kind: "tests".into(),
+                    summary: s.into(),
+                    ok: Some(true),
+                    details: json!({}),
+                    at: String::new(),
+                })
+                .collect(),
+        };
+        assert_eq!(outcomes_line(&[agent("a1", vec![])]), None);
+        assert_eq!(
+            outcomes_line(&[
+                agent("a1", vec!["3 passed (cargo test)", "1 file added"]),
+                agent("a2", vec![]),
+                agent("a3", vec!["accepted"]),
+            ])
+            .unwrap(),
+            "run a1: 3 passed (cargo test) · 1 file added
+run a3: accepted"
+        );
     }
 }

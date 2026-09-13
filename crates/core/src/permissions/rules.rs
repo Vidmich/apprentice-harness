@@ -246,7 +246,8 @@ const CATASTROPHIC: &[(&str, &str)] = &[
 ];
 
 /// The rules below every file: read-only calls inside the workspace are
-/// allowed, the [`CATASTROPHIC`] commands denied.
+/// allowed, the [`CATASTROPHIC`] commands denied — whichever tool
+/// carries the command (`shell`, `run_tests`, ...).
 pub fn builtin_rules() -> &'static [CompiledRule] {
     static RULES: OnceLock<Vec<CompiledRule>> = OnceLock::new();
     RULES.get_or_init(|| {
@@ -265,7 +266,7 @@ pub fn builtin_rules() -> &'static [CompiledRule] {
         for (name, regex) in CATASTROPHIC {
             rules.push(CompiledRule::named(
                 RuleSpec {
-                    tool: "shell".into(),
+                    tool: "*".into(),
                     effect: RuleEffect::Deny,
                     r#match: RuleMatch {
                         command_regex: Some((*regex).to_owned()),

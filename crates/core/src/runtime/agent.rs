@@ -15,6 +15,13 @@
 //! `session_messages` as it happens (task M01-10): the assistant turn
 //! with its `assistant.message`, the tool results after the step, so a
 //! daemon that dies mid-run leaves a history the next one resumes.
+//!
+//! Outcome signals (task M01-15) are recorded as they arise: the
+//! `tests` / `build` result of a tool run right after the step's
+//! tools, the `files_changed` of the run at its end, an `error` when
+//! the loop stops itself, a `reverted` for the previous run when the
+//! start snapshot shows its changes undone. A watchdog ends a run that
+//! shows no sign of life for [`stall_window`] as `error: stalled`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,7 +41,10 @@ use super::hooks::{CallContext, StepHooks, ToolExecContext, ToolResultContext};
 use super::prompt::build_system;
 use crate::app::AppState;
 use crate::config::Config;
-use crate::mentor::{Mentor, MentorError, MentorResponse, StopReason, StreamEvent};
+use crate::mentor::{
+    ContentBlock, Mentor, MentorError, MentorResponse, StopReason, StreamEvent, ToolResultContent,
+};
+use crate::outcomes::{self, Outcome};
 use crate::permissions::{AgentPrompter, Engine, EventSink, PermissionGate, Prompter};
 use crate::stats::{micros_to_usd, price_call};
 use crate::tools::{Executed, Executor, SeenFiles, ToolCall, ToolProgress, ToolResultKind};
@@ -116,11 +126,32 @@ pub(super) async fn execute(
 
     let finish = match Run::setup(state, handle, opts, conversation, hooks).await {
         Ok(mut run) => {
+            let watchdog = run.spawn_watchdog();
             let start = run.snapshot(SnapshotPhase::Start).await;
-            let finish = match run.run_loop(conversation).await {
+            if let Some(start) = &start {
+                run.check_reverted(start).await;
+            }
+            let mut finish = match run.run_loop(conversation).await {
                 Ok(f) => f,
                 Err(e) => Finish::from_error(e),
             };
+            if let Some(w) = watchdog {
+                w.abort();
+            }
+            if handle.activity().is_stalled() {
+                let window = stall_window(&run.config);
+                let details = json!({ "window_s": window.as_secs() });
+                run.record_outcome(&Outcome::error("stalled", &details), None)
+                    .await;
+                finish = Finish::stopped(
+                    "stalled",
+                    format!(
+                        "no sign of life for {} s; the run was ended by the watchdog",
+                        window.as_secs()
+                    ),
+                    details,
+                );
+            }
             run.finish_snapshot(start).await;
             finish
         }
@@ -261,6 +292,22 @@ async fn record_prefix(
     Ok(())
 }
 
+/// How long a run may go without an event before the watchdog ends
+/// it: the longest configured wait (the mentor's timeout, the execute
+/// tools' timeout, the permission prompt's) plus
+/// `runtime.stall_grace_s`; zero when the grace is zero (off).
+pub fn stall_window(config: &Config) -> Duration {
+    if config.runtime.stall_grace_s == 0 {
+        return Duration::ZERO;
+    }
+    let longest = config
+        .mentor
+        .timeout_s
+        .max(config.tools.timeout_s.execute)
+        .max(config.permissions.ask_timeout_s);
+    Duration::from_secs(longest.saturating_add(config.runtime.stall_grace_s))
+}
+
 /// Everything one run needs, resolved once before the first step.
 struct Run<'a> {
     state: &'a Arc<AppState>,
@@ -360,6 +407,86 @@ impl<'a> Run<'a> {
         self.handle.emit(event);
     }
 
+    /// Starts the watchdog: a task that ends the run (cancels it, with
+    /// the stalled mark set) once no event has been emitted for
+    /// [`stall_window`]. `None` when the window is zero.
+    fn spawn_watchdog(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let window = stall_window(&self.config);
+        if window.is_zero() {
+            return None;
+        }
+        let handle = self.handle.clone();
+        let activity = Arc::clone(handle.activity());
+        activity.touch();
+        Some(tokio::spawn(async move {
+            let tick = (window / 4).clamp(Duration::from_millis(200), Duration::from_secs(15));
+            loop {
+                tokio::time::sleep(tick).await;
+                if handle.cancel.is_cancelled() {
+                    return;
+                }
+                let idle = activity.idle();
+                if idle >= window {
+                    warn!(
+                        agent = %handle.agent_id,
+                        idle_s = idle.as_secs(),
+                        window_s = window.as_secs(),
+                        "no sign of life; ending the run as stalled"
+                    );
+                    activity.mark_stalled();
+                    handle.cancel.cancel();
+                    return;
+                }
+            }
+        }))
+    }
+
+    /// Records an outcome (at `at` when given, else on the agent) and
+    /// tells the subscribers. A trace failure is logged, not fatal:
+    /// the run goes on without the label.
+    async fn record_outcome(&self, outcome: &Outcome, at: Option<&StepRef>) {
+        let ev = match at {
+            Some(at) => outcome.event_at(at),
+            None => outcome.event(self.handle.session_id.clone(), self.handle.agent_id.clone()),
+        };
+        match self.state.writer().append(ev).await {
+            Ok(id) => {
+                let (summary, ok) = outcome.describe();
+                info!(kind = outcome.kind, %summary, ?ok, "outcome recorded");
+                self.emit(outcome.live_event(&self.handle.agent_id, id.as_str()));
+            }
+            Err(e) => warn!(error = %e, kind = outcome.kind, "cannot record the outcome"),
+        }
+    }
+
+    /// The `reverted` outcome of the previous run, when `start` shows
+    /// its changes undone (see [`super::revert`]).
+    async fn check_reverted(&self, start: &Snapshot) {
+        let Some(ws) = self.workspace.as_ref() else {
+            return;
+        };
+        match super::revert::detect(
+            self.state,
+            &self.handle.session_id,
+            &self.handle.agent_id,
+            ws.root(),
+            start,
+        ) {
+            Ok(Some((previous, outcome))) => {
+                let ev = outcome.event(self.handle.session_id.clone(), previous.clone());
+                match self.state.writer().append(ev).await {
+                    Ok(id) => {
+                        info!(agent = %previous, files = outcome.details["files"].as_array().map_or(0, Vec::len), "previous run's changes reverted");
+                        self.emit(outcome.live_event(&previous, id.as_str()));
+                    }
+                    Err(e) => warn!(error = %e, "cannot record the reverted outcome"),
+                }
+            }
+            Ok(None) => {}
+            Err(e) => debug!(error = %e, "revert check skipped"),
+        }
+    }
+
     /// Takes and records a workspace snapshot; `None` without a
     /// workspace.
     async fn snapshot(&self, phase: SnapshotPhase) -> Option<Snapshot> {
@@ -383,19 +510,7 @@ impl<'a> Run<'a> {
             return;
         };
         let changed = end.changes_since(&start);
-        info!(
-            changed = changed.changed.len(),
-            added = changed.added.len(),
-            deleted = changed.deleted.len(),
-            "files changed by the run"
-        );
-        let ev = changed.event(
-            self.handle.session_id.clone(),
-            Some(self.handle.agent_id.clone()),
-        );
-        if let Err(e) = self.state.writer().append(ev).await {
-            warn!(error = %e, "cannot record the files_changed outcome");
-        }
+        self.record_outcome(&changed.outcome(), None).await;
     }
 
     async fn record(&self, ev: NewEvent) -> Result<(), RpcError> {
@@ -418,18 +533,8 @@ impl<'a> Run<'a> {
 
     /// `outcome {kind: error}` for a run the loop stops itself.
     async fn record_error_outcome(&self, kind: &str, details: Value) {
-        let mut payload = json!({ "kind": "error", "details": { "kind": kind } });
-        if let Some(extra) = details.as_object() {
-            for (k, v) in extra {
-                payload["details"][k] = v.clone();
-            }
-        }
-        let ev = NewEvent::new(self.handle.session_id.clone(), kinds::OUTCOME)
-            .agent(self.handle.agent_id.clone())
-            .payload(payload);
-        if let Err(e) = self.record(ev).await {
-            warn!(error = %e, "cannot record the error outcome");
-        }
+        self.record_outcome(&Outcome::error(kind, &details), None)
+            .await;
     }
 
     async fn start_step(&self) -> Result<StepRef, RpcError> {
@@ -807,6 +912,11 @@ impl<'a> Run<'a> {
                 step: seq,
             })
             .await;
+        // What the outcome heuristics need of each call once it ran.
+        let inputs: HashMap<String, (String, Value)> = calls
+            .iter()
+            .map(|c| (c.id.clone(), (c.name.clone(), c.input.clone())))
+            .collect();
 
         let (progress_tx, mut progress_rx) = mpsc::channel::<ToolProgress>(64);
         let forwarder = {
@@ -872,6 +982,18 @@ impl<'a> Run<'a> {
                 step: seq,
             })
             .await;
+        for r in &results {
+            if r.kind != ToolResultKind::Ok && r.kind != ToolResultKind::Error {
+                continue;
+            }
+            let Some((name, input)) = inputs.get(&r.call_id) else {
+                continue;
+            };
+            let text = result_text(&r.block);
+            if let Some(outcome) = outcomes::from_tool_result(name, input, text, &r.metadata) {
+                self.record_outcome(&outcome, Some(at)).await;
+            }
+        }
         let cancelled = results.iter().any(|r| r.kind == ToolResultKind::Cancelled)
             || self.handle.cancel.is_cancelled();
         conv.push_tool_results(results.into_iter().map(|r| r.block).collect());
@@ -890,6 +1012,20 @@ impl<'a> Run<'a> {
         )
         .await?;
         Ok(cancelled)
+    }
+}
+
+/// The text of a `tool_result` block (what the mentor reads).
+fn result_text(block: &ContentBlock) -> &str {
+    match block {
+        ContentBlock::ToolResult { content, .. } => content
+            .iter()
+            .find_map(|c| match c {
+                ToolResultContent::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap_or(""),
+        _ => "",
     }
 }
 

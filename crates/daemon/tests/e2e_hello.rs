@@ -256,6 +256,7 @@ async fn hello_round_trips_through_the_mentor_into_the_trace() {
                     "agent.text_delta",
                     "agent.text_delta",
                     "agent.usage",
+                    "agent.outcome",
                     "agent.finished",
                     "result"
                 ],

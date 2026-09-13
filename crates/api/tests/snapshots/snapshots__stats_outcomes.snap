@@ -1,0 +1,33 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(StatsOutcomesParams\n{ since: Some(\"7d\".into()), until: None, workspace_id: None, }, OutcomeStats\n{\n    range: StatsRange\n    { since: Some(\"2026-09-05T00:00:00Z\".into()), until: None, }, agents: 20,\n    labelled: 13, labelled_share: 0.65, by_kind:\n    [(\"files_changed\".to_owned(), 17), (\"tests\".to_owned(), 11),\n    (\"user_accept\".to_owned(), 6),\n    (\"error\".to_owned(), 2),].into_iter().collect(), tests_passed: 9,\n    tests_failed: 2, accepted: 6, rejected: 1, done: 4, errors:\n    [(\"max_iterations\".to_owned(), 1),\n    (\"stalled\".to_owned(), 1)].into_iter().collect(),\n})"
+---
+[
+  {
+    "since": "7d"
+  },
+  {
+    "range": {
+      "since": "2026-09-05T00:00:00Z",
+      "until": null
+    },
+    "agents": 20,
+    "labelled": 13,
+    "labelled_share": 0.65,
+    "by_kind": {
+      "error": 2,
+      "files_changed": 17,
+      "tests": 11,
+      "user_accept": 6
+    },
+    "tests_passed": 9,
+    "tests_failed": 2,
+    "accepted": 6,
+    "rejected": 1,
+    "done": 4,
+    "errors": {
+      "max_iterations": 1,
+      "stalled": 1
+    }
+  }
+]

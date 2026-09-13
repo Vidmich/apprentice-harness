@@ -1,17 +1,18 @@
-//! `stats.tokens`, `stats.calls` and `stats.reprice` over the trace store
-//! and the pricing table. The daemon registers them on its router (task
-//! M00-08; the calls list and the breakdown choice are task M01-13).
+//! `stats.tokens`, `stats.calls`, `stats.reprice` and `stats.outcomes`
+//! over the trace store and the pricing table. The daemon registers
+//! them on its router (task M00-08; the calls list and the breakdown
+//! choice are task M01-13; the outcome counts task M01-15).
 
 use std::sync::Arc;
 
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
-    StatsCalls, StatsCallsParams, StatsCallsResult, StatsReprice, StatsRepriceParams,
-    StatsRepriceResult, StatsTokens, StatsTokensParams,
+    StatsCalls, StatsCallsParams, StatsCallsResult, StatsOutcomes, StatsOutcomesParams,
+    StatsReprice, StatsRepriceParams, StatsRepriceResult, StatsTokens, StatsTokensParams,
 };
 use apprentice_api::server::{Connection, Router};
 use apprentice_api::types::{
-    ApprenticeStats, CallSummary, StatsGroup, StatsRange, TokenBucket, TokenStats,
+    ApprenticeStats, CallSummary, OutcomeStats, StatsGroup, StatsRange, TokenBucket, TokenStats,
 };
 use time::{OffsetDateTime, UtcOffset};
 
@@ -19,7 +20,8 @@ use super::cost::{PriceTable, micros_to_usd, price_call};
 use super::range::{BoundKind, format_offset, parse_bound};
 use crate::config::ConfigLoader;
 use crate::trace::{
-    CallFilter, CallListRow, GroupBy, GroupedTotals, TraceError, TraceStore, UsageTotals,
+    CallFilter, CallListRow, GroupBy, GroupedTotals, OutcomeFilter, TraceError, TraceStore,
+    UsageTotals,
 };
 
 /// Where the price table comes from.
@@ -189,7 +191,29 @@ impl StatsService {
         })
     }
 
-    /// Registers the three methods; each runs on the blocking pool.
+    /// The outcome signals of the runs started in the range (task
+    /// M01-15).
+    ///
+    /// # Errors
+    /// `invalid_params` for an unparsable bound, else a store error.
+    pub fn outcomes(&self, p: &StatsOutcomesParams) -> Result<OutcomeStats, RpcError> {
+        let offset = self.offset()?;
+        let filter = Self::filter(
+            p.since.as_deref(),
+            p.until.as_deref(),
+            None,
+            p.workspace_id.as_deref(),
+            None,
+            offset,
+        )?;
+        Ok(self.store.outcome_stats(&OutcomeFilter {
+            since: filter.since,
+            until: filter.until,
+            workspace_id: filter.workspace_id,
+        })?)
+    }
+
+    /// Registers the methods; each runs on the blocking pool.
     pub fn register(self: Arc<Self>, router: &mut Router) {
         let svc = Arc::clone(&self);
         router.add::<StatsTokens, _, _>(move |_c: Arc<Connection>, p: StatsTokensParams| {
@@ -205,6 +229,11 @@ impl StatsService {
         router.add::<StatsReprice, _, _>(move |_c: Arc<Connection>, p: StatsRepriceParams| {
             let svc = Arc::clone(&svc);
             blocking(move || svc.reprice(&p))
+        });
+        let svc = Arc::clone(&self);
+        router.add::<StatsOutcomes, _, _>(move |_c: Arc<Connection>, p: StatsOutcomesParams| {
+            let svc = Arc::clone(&svc);
+            blocking(move || svc.outcomes(&p))
         });
     }
 }

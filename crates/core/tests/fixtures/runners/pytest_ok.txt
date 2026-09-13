@@ -1,0 +1,11 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.4, pytest-8.3.2, pluggy-1.5.0
+rootdir: C:\src\ml
+configfile: pyproject.toml
+collected 9 items
+
+tests\test_bundle.py ....                                                [ 44%]
+tests\test_traces.py ...s.                                               [100%]
+
+======================== 8 passed, 1 skipped in 0.42s =========================
+exit 0 · 1.1 s

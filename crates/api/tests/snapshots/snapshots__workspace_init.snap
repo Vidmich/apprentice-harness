@@ -1,0 +1,12 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(WorkspaceInitParams { id: \"w1\".into(), force: false, }, WorkspaceInitResult\n{ path: \"/src/repo/.harness/HARNESS.md\".into(), replaced: false, })"
+---
+[
+  {
+    "id": "w1"
+  },
+  {
+    "path": "/src/repo/.harness/HARNESS.md"
+  }
+]

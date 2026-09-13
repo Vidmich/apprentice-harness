@@ -297,6 +297,27 @@ async fn stream(
                     wait_ms.div_ceil(1000)
                 ));
             }
+            Event::AgentOutcome {
+                kind,
+                summary,
+                ok,
+                details,
+                ..
+            } => {
+                // A run that touched nothing has nothing to say here.
+                let nothing = kind == "files_changed"
+                    && details["counts"]
+                        .as_object()
+                        .is_some_and(|c| c.values().all(|v| v.as_u64() == Some(0)));
+                if !nothing {
+                    let mark = match ok {
+                        Some(true) => "✓ ",
+                        Some(false) => "✗ ",
+                        None => "",
+                    };
+                    out.info(format!("outcome {kind}: {mark}{summary}"));
+                }
+            }
             Event::AgentUsage {
                 usage: u, cost_usd, ..
             } => {

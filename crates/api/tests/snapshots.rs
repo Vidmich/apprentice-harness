@@ -10,22 +10,23 @@ use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
     PermissionRespondParams, PromptBlock, PromptShowParams, PromptShowResult, SessionDeleteParams,
     SessionDeleteResult, SessionGetParams, SessionGetResult, SessionListParams, SessionListResult,
-    SessionSearchParams, SessionSearchResult, StatsCallsParams, StatsCallsResult,
-    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
-    ToolsRuleParams, ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceExportParams,
-    TraceExportResult, TraceGetParams, TraceImportParams, TraceImportResult, TraceListParams,
-    TraceReplayCheckParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
-    WorkspaceListResult, WorkspaceRemoveResult,
+    SessionMarkParams, SessionMarkResult, SessionSearchParams, SessionSearchResult,
+    StatsCallsParams, StatsCallsResult, StatsOutcomesParams, StatsRepriceParams,
+    StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult, ToolsRuleParams,
+    ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceExportParams, TraceExportResult,
+    TraceGetParams, TraceImportParams, TraceImportResult, TraceListParams, TraceReplayCheckParams,
+    WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult, WorkspaceInitParams,
+    WorkspaceInitResult, WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
     AgentSummary, ApprenticeStats, BUNDLE_FORMAT_VERSION, BundleCounts, BundleManifest,
     BundleSelection, BundleSession, CallSummary, ConfigLayer, Effort, ImportedSession,
-    MentorCallInfo, PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource,
-    RedactionReport, RedactionRule, ReplayCall, ReplayReport, ReplayStatus, RuleDefault,
-    RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource, RuleSpec, RunOptions,
-    SESSION_EXPORT_FORMAT, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
-    SessionSummary, StatsGroup, StatsRange, TokenBucket, TokenStats, ToolInfo, Usage,
-    WorkspaceSummary,
+    MentorCallInfo, OutcomeInfo, OutcomeStats, PermissionAnswer, PermissionDecision,
+    PermissionMode, PermissionSource, RedactionReport, RedactionRule, ReplayCall, ReplayReport,
+    ReplayStatus, RuleDefault, RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource, RuleSpec,
+    RunOptions, SESSION_EXPORT_FORMAT, SessionExport, SessionInfo, SessionMark, SessionMessage,
+    SessionSearchHit, SessionSummary, StatsGroup, StatsRange, TokenBucket, TokenStats, ToolInfo,
+    Usage, WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -155,6 +156,41 @@ fn stats_shape() {
             by_kind: vec![bucket(Some("step"))],
             apprentice: ApprenticeStats::default(),
         }
+    );
+    assert_json_snapshot!(
+        "stats_outcomes",
+        (
+            StatsOutcomesParams {
+                since: Some("7d".into()),
+                until: None,
+                workspace_id: None,
+            },
+            OutcomeStats {
+                range: StatsRange {
+                    since: Some("2026-09-05T00:00:00Z".into()),
+                    until: None,
+                },
+                agents: 20,
+                labelled: 13,
+                labelled_share: 0.65,
+                by_kind: [
+                    ("files_changed".to_owned(), 17),
+                    ("tests".to_owned(), 11),
+                    ("user_accept".to_owned(), 6),
+                    ("error".to_owned(), 2),
+                ]
+                .into_iter()
+                .collect(),
+                tests_passed: 9,
+                tests_failed: 2,
+                accepted: 6,
+                rejected: 1,
+                done: 4,
+                errors: [("max_iterations".to_owned(), 1), ("stalled".to_owned(), 1)]
+                    .into_iter()
+                    .collect(),
+            }
+        )
     );
     assert_json_snapshot!(
         "stats_calls",
@@ -393,7 +429,62 @@ fn session_shapes() {
                     calls: 2,
                     usage,
                     cost_usd: Some(0.0138),
+                    error: None,
+                    outcomes: vec![
+                        OutcomeInfo {
+                            event_id: "e20".into(),
+                            kind: "tests".into(),
+                            summary: "12 passed (cargo test)".into(),
+                            ok: Some(true),
+                            details: json!({
+                                "runner": "cargo",
+                                "passed": 12,
+                                "failed": 0,
+                                "skipped": 1,
+                                "exit_code": 0,
+                                "duration_ms": 2410,
+                                "command": "cargo test",
+                                "source": "run_tests",
+                            }),
+                            at: "2026-09-12T10:00:07.000Z".into(),
+                        },
+                        OutcomeInfo {
+                            event_id: "e24".into(),
+                            kind: "files_changed".into(),
+                            summary: "1 file added".into(),
+                            ok: None,
+                            details: json!({
+                                "changed": [],
+                                "added": ["src/hello.rs"],
+                                "deleted": [],
+                                "counts": { "changed": 0, "added": 1, "deleted": 0 },
+                            }),
+                            at: "2026-09-12T10:00:09.000Z".into(),
+                        },
+                    ],
                 }],
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "session_mark",
+        (
+            SessionMarkParams {
+                id: "s1".into(),
+                mark: SessionMark::Accept,
+                note: Some("compiles and the tests pass".into()),
+                agent_id: None,
+            },
+            SessionMarkResult {
+                agent_id: "a1".into(),
+                outcome: OutcomeInfo {
+                    event_id: "e30".into(),
+                    kind: "user_accept".into(),
+                    summary: "accepted: compiles and the tests pass".into(),
+                    ok: Some(true),
+                    details: json!({ "note": "compiles and the tests pass" }),
+                    at: "2026-09-12T10:06:00.000Z".into(),
+                },
             }
         )
     );
@@ -675,6 +766,8 @@ fn bundle_shapes() {
                 session_id: Some("s1".into()),
                 agent_id: None,
                 call_id: None,
+                since: None,
+                until: None,
                 rebuild: true,
             },
             ReplayReport {
@@ -761,6 +854,19 @@ fn workspace_shapes() {
             WorkspaceIdParams { id: "w1".into() },
             WorkspaceRemoveResult {
                 sessions_unlinked: 2
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "workspace_init",
+        (
+            WorkspaceInitParams {
+                id: "w1".into(),
+                force: false,
+            },
+            WorkspaceInitResult {
+                path: "/src/repo/.harness/HARNESS.md".into(),
+                replaced: false,
             }
         )
     );
@@ -857,6 +963,23 @@ fn event_shapes() {
             reason: "rate_limited".into(),
             until: "2026-09-12T10:00:30.000Z".into(),
             wait_ms: 30_000,
+        },
+        Event::AgentOutcome {
+            agent_id: "a1".into(),
+            event_id: "e20".into(),
+            kind: "tests".into(),
+            summary: "11 passed, 1 failed (cargo test)".into(),
+            ok: Some(false),
+            details: json!({
+                "runner": "cargo",
+                "passed": 11,
+                "failed": 1,
+                "skipped": 0,
+                "exit_code": 101,
+                "duration_ms": 2410,
+                "command": "cargo test",
+                "source": "shell",
+            }),
         },
         Event::AgentFinished {
             agent_id: "a1".into(),

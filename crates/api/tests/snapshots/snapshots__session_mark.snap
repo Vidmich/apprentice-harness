@@ -1,0 +1,24 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(SessionMarkParams\n{\n    id: \"s1\".into(), mark: SessionMark::Accept, note:\n    Some(\"compiles and the tests pass\".into()), agent_id: None,\n}, SessionMarkResult\n{\n    agent_id: \"a1\".into(), outcome: OutcomeInfo\n    {\n        event_id: \"e30\".into(), kind: \"user_accept\".into(), summary:\n        \"accepted: compiles and the tests pass\".into(), ok: Some(true),\n        details: json!({ \"note\": \"compiles and the tests pass\" }), at:\n        \"2026-09-12T10:06:00.000Z\".into(),\n    },\n})"
+---
+[
+  {
+    "id": "s1",
+    "mark": "accept",
+    "note": "compiles and the tests pass"
+  },
+  {
+    "agent_id": "a1",
+    "outcome": {
+      "event_id": "e30",
+      "kind": "user_accept",
+      "summary": "accepted: compiles and the tests pass",
+      "ok": true,
+      "details": {
+        "note": "compiles and the tests pass"
+      },
+      "at": "2026-09-12T10:06:00.000Z"
+    }
+  }
+]

@@ -24,6 +24,26 @@ use crate::methods::{
     DaemonHello, DaemonShutdown, HelloParams, HelloResult, Method, ShutdownParams,
 };
 
+/// The most recent method dispatched by any router in this process,
+/// for the crash report of the panic hook (task M01-15).
+static LAST_METHOD: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn note_last_method(method: &str) {
+    if let Ok(mut last) = LAST_METHOD.lock()
+        && last.as_deref() != Some(method)
+    {
+        *last = Some(method.to_owned());
+    }
+}
+
+/// The last RPC method any router dispatched, if one has.
+pub fn last_method() -> Option<String> {
+    LAST_METHOD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
 /// Static facts the router reports in the handshake.
 #[derive(Debug, Clone)]
 pub struct RouterConfig {
@@ -341,6 +361,7 @@ impl Router {
         };
 
         let conn = Arc::clone(conn);
+        note_last_method(&method);
         let span = tracing::info_span!("rpc", method = %method, id = ?id, conn = conn.id);
         tasks.spawn(async move {
             let started = std::time::Instant::now();

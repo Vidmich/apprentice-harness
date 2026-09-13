@@ -124,12 +124,22 @@ impl BundleService {
     }
 
     /// # Errors
-    /// `not_found` for an unknown call, else a store failure.
+    /// `not_found` for an unknown call, `invalid_params` for a bad
+    /// bound, else a store failure.
     pub fn replay_check(&self, p: &TraceReplayCheckParams) -> Result<ReplayReport, RpcError> {
+        let offset = self.offset()?;
+        let now = OffsetDateTime::now_utc();
+        let bound = |text: Option<&str>, kind| {
+            text.map(|t| parse_bound(t, kind, now, offset))
+                .transpose()
+                .map_err(RpcError::invalid_params)
+        };
         let sel = ReplaySelection {
             session_id: p.session_id.clone(),
             agent_id: p.agent_id.clone(),
             call_id: p.call_id.clone(),
+            since: bound(p.since.as_deref(), BoundKind::Since)?,
+            until: bound(p.until.as_deref(), BoundKind::Until)?,
         };
         Ok(replay_check(&self.store, &sel, p.rebuild)?)
     }

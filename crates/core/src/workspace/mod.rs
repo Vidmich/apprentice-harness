@@ -38,7 +38,7 @@ pub use rpc::WorkspaceService;
 pub use rules::{BUILTIN_IGNORES, IgnoreRules};
 pub use snapshot::{
     DIFF_MEDIA_TYPE, FilesChanged, GitSnapshot, SNAPSHOT_DIFF_MAX, SNAPSHOT_LIST_MAX, Snapshot,
-    SnapshotPhase,
+    SnapshotPhase, diff_paths,
 };
 
 use crate::trace::{TraceError, WorkspaceId, WorkspaceRecord};
