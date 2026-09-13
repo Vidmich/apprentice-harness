@@ -38,6 +38,15 @@ toml_edit = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+# Job objects for the shell tool: a command's whole process tree dies
+# with the call (see `tools::shell::process`), plus `CREATE_NO_WINDOW`.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+# `killpg` for the shell tool's process groups.
+libc = "0.2"
+
 [dev-dependencies]
 apprentice-client = { workspace = true }
 insta = { workspace = true }

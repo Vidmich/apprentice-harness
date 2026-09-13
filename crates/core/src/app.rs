@@ -333,6 +333,8 @@ mod tests {
                 "grep",
                 "list_dir",
                 "read_file",
+                "shell",
+                "shell_jobs",
                 "write_file"
             ]
         );

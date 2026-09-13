@@ -190,6 +190,7 @@ pub struct ToolsConfig {
     pub max_mentor_bytes: u64,
     /// Default timeouts in seconds by risk class; a tool spec may override.
     pub timeout_s: ToolTimeouts,
+    pub shell: ShellConfig,
 }
 
 impl Default for ToolsConfig {
@@ -199,6 +200,52 @@ impl Default for ToolsConfig {
             max_capture_bytes: 8 * 1024 * 1024,
             max_mentor_bytes: 32 * 1024,
             timeout_s: ToolTimeouts::default(),
+            shell: ShellConfig::default(),
+        }
+    }
+}
+
+/// The `shell` tool (task M01-05).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShellConfig {
+    /// The program that runs a command. Empty picks one per OS: `pwsh`
+    /// (else `powershell`) on Windows, `$SHELL` (else `/bin/sh`)
+    /// elsewhere.
+    pub program: String,
+    /// Its arguments before the command. Empty means the program's own
+    /// defaults (`-NoProfile -NonInteractive -Command` for PowerShell,
+    /// `-lc` for a Unix shell); a configured `program` with no `args`
+    /// gets the command as its only argument.
+    pub args: Vec<String>,
+    /// Environment variables a command never sees, as names or `*`
+    /// patterns (matched case-insensitively).
+    pub scrub_env: Vec<String>,
+    /// Variables set for every command, on top of `HARNESS=1`,
+    /// `NO_COLOR=1` and `TERM=dumb` (e.g. `CI = "1"`).
+    pub env: BTreeMap<String, String>,
+    /// Longest `timeout_s` a call may ask for.
+    pub max_timeout_s: u64,
+}
+
+impl Default for ShellConfig {
+    fn default() -> Self {
+        Self {
+            program: String::new(),
+            args: Vec::new(),
+            scrub_env: [
+                "ANTHROPIC_API_KEY",
+                "*_API_KEY",
+                "*_TOKEN",
+                "*_SECRET",
+                "*_SECRET_*",
+                "*_PASSWORD",
+                "AWS_*",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            env: BTreeMap::new(),
+            max_timeout_s: 3600,
         }
     }
 }

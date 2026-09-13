@@ -135,7 +135,7 @@ pub struct Executor<'a> {
     registry: &'a ToolRegistry,
     gate: &'a dyn Gate,
     writer: &'a TraceWriter,
-    config: &'a ToolsConfig,
+    config: Arc<ToolsConfig>,
     at: StepRef,
     cancel: CancellationToken,
     workspace: Option<Arc<Workspace>>,
@@ -170,7 +170,7 @@ impl<'a> Executor<'a> {
             registry,
             gate,
             writer,
-            config,
+            config: Arc::new(config.clone()),
             at,
             cancel,
             workspace: None,
@@ -242,13 +242,14 @@ impl<'a> Executor<'a> {
         let spec = entry.as_ref().map(|e| e.spec.clone());
         let env = spec
             .as_ref()
-            .map_or_else(ToolEnv::default, |s| ToolEnv::resolve(self.config, s));
+            .map_or_else(ToolEnv::default, |s| ToolEnv::resolve(&self.config, s));
         let ctx = ToolContext {
             workspace: self.workspace.clone(),
             session_id: self.at.session.clone(),
             agent_id: self.at.agent.clone(),
             call_id: call.id.clone(),
             env,
+            config: Arc::clone(&self.config),
             seen: Arc::clone(&self.seen),
             progress: self.progress.clone(),
         };
@@ -335,7 +336,7 @@ impl<'a> Executor<'a> {
         spec: Option<&ToolSpec>,
     ) -> Executed {
         let name = call.name.as_str();
-        let (kind, text, summary, raw, metadata, message) = match outcome {
+        let (kind, text, summary, raw, metadata, message, attachments) = match outcome {
             Ok(output) => {
                 let (raw, media_type) = output.content.to_bytes();
                 let kind = if output.is_error {
@@ -355,6 +356,7 @@ impl<'a> Executor<'a> {
                     Some((raw, media_type.to_owned(), output.content)),
                     output.metadata,
                     None,
+                    output.attachments,
                 )
             }
             Err(err) => {
@@ -377,6 +379,7 @@ impl<'a> Executor<'a> {
                     None,
                     Value::Null,
                     Some(err.to_string()),
+                    Vec::new(),
                 )
             }
         };
@@ -408,6 +411,28 @@ impl<'a> Executor<'a> {
             }
             media_type = Some(mt);
             content = Some(c);
+        }
+        // Side outputs: a blob each (the tool keeps them within bounds),
+        // listed by name in the payload.
+        let mut attached = Vec::with_capacity(attachments.len());
+        for a in attachments {
+            let bytes = a.bytes.len();
+            let (data, mt) = (a.bytes, a.media_type.clone());
+            match self
+                .writer
+                .run(move |store| store.put_blob(&data, &mt))
+                .await
+            {
+                Ok(id) => attached.push(json!({
+                    "name": a.name,
+                    "blob_id": id,
+                    "bytes": bytes,
+                    "media_type": a.media_type,
+                })),
+                Err(e) => {
+                    warn!(call = %call.id, name = %a.name, error = %e, "cannot store attachment");
+                }
+            }
         }
 
         let (text, truncated) = match (text, content) {
@@ -441,6 +466,9 @@ impl<'a> Executor<'a> {
         }
         if !metadata.is_null() {
             payload["metadata"] = metadata;
+        }
+        if !attached.is_empty() {
+            payload["attachments"] = Value::Array(attached);
         }
         if let Some(risk) = spec.map(|s| s.risk) {
             payload["risk"] = json!(risk);

@@ -202,6 +202,7 @@ dependencies = [
  "insta",
  "jsonschema",
  "keyring",
+ "libc",
  "reqwest",
  "rusqlite",
  "serde",
@@ -218,6 +219,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
  "wiremock",
 ]
 

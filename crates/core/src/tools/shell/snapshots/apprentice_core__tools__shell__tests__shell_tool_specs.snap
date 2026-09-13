@@ -1,0 +1,93 @@
+---
+source: crates/core/src/tools/shell/tests.rs
+expression: specs
+---
+[
+  {
+    "name": "shell",
+    "description": "Runs a command in the workspace and returns its output.\n\nThe command goes to PowerShell (`pwsh -NoProfile -NonInteractive -Command`, or `powershell` where pwsh is missing) on Windows and to the login shell (`$SHELL -lc`, else `/bin/sh`) elsewhere. It runs in `cwd` (a directory relative to the workspace root, default the root) with stdin closed, `NO_COLOR=1` and `TERM=dumb` set and secrets removed from the environment.\n\nThe result is the combined output in the order it appeared — stdout as is, a `[err]` line before a run of stderr lines and `[out]` where stdout resumes — followed by `exit <code> · <duration>`. A non-zero exit is reported the same way: read the output and the code; it is not a failure of the tool. Long output is cut in the middle (`[... N bytes omitted]`). A command still running after `timeout_s` seconds (default 120, at most 3600) is killed with its whole process tree and the output so far comes back with `timed out after N s`.\n\nUse `background: true` for servers, watchers and anything that should keep running: the call returns a job id at once and `shell_jobs` reads the job's output, waits for it or kills it. Background jobs die with the agent unless `detach: true`.\n\nPrefer the dedicated tools for reading, writing, listing and searching files: they are faster and their output is smaller.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "default": false,
+          "description": "Return at once with a job id; manage the job with `shell_jobs`.",
+          "type": "boolean"
+        },
+        "command": {
+          "description": "The command line, as typed at the shell's prompt.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "cwd": {
+          "description": "Directory to run in, relative to the workspace root (default: the root).",
+          "type": "string"
+        },
+        "description": {
+          "description": "One line for the user saying what the command is for.",
+          "maxLength": 200,
+          "type": "string"
+        },
+        "detach": {
+          "default": false,
+          "description": "With `background`: let the job outlive the agent.",
+          "type": "boolean"
+        },
+        "timeout_s": {
+          "default": 120,
+          "description": "Seconds before the command and its process tree are killed.",
+          "maximum": 3600,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "risk": "execute",
+    "tags": [
+      "shell"
+    ],
+    "timeout_s": 3660
+  },
+  {
+    "name": "shell_jobs",
+    "description": "Looks after the background jobs started with `shell` (`background: true`).\n\n`action`: `list` — every job with its status; `output` — the output of `job_id` so far, ending in its status line (`running · 12.3 s` or `exit <code> · <duration>`); `wait` — like `output`, but first waits up to `timeout_s` seconds (default 30) for the job to end; `kill` — kills the job's process tree and returns its final output.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "list",
+            "output",
+            "wait",
+            "kill"
+          ],
+          "type": "string"
+        },
+        "job_id": {
+          "description": "The job (`j1`, `j2`, ...); required except for `list`.",
+          "type": "string"
+        },
+        "timeout_s": {
+          "default": 30,
+          "description": "`wait`: seconds to wait for the job to end.",
+          "maximum": 600,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "shell"
+    ],
+    "timeout_s": 660
+  }
+]

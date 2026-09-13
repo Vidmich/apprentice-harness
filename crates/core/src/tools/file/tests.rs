@@ -73,6 +73,7 @@ impl Fixture {
             agent_id: AgentId::generate(),
             call_id: "t1".into(),
             env: ToolEnv::default(),
+            config: Arc::default(),
             seen: Arc::clone(&self.seen),
             progress,
         }

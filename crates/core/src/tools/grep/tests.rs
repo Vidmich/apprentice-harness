@@ -68,6 +68,7 @@ impl Fixture {
             agent_id: AgentId::generate(),
             call_id: "t1".into(),
             env: ToolEnv::default(),
+            config: Arc::default(),
             seen: Arc::new(SeenFiles::new()),
             progress,
         }

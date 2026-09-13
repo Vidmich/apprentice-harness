@@ -365,6 +365,63 @@ async fn grep_leaves_its_raw_output_in_the_trace() {
 }
 
 #[tokio::test]
+async fn shell_stores_the_transcript_and_the_streams_apart() {
+    let h = Harness::new();
+    let command = if cfg!(windows) {
+        "[Console]::Error.WriteLine('warn'); echo hello; exit 2"
+    } else {
+        "echo warn >&2; echo hello; exit 2"
+    };
+    let input = json!({"command": command, "description": "says hello"});
+    let out = h.run("s1", "shell", input.clone()).await;
+    assert_eq!(out.kind, ToolResultKind::Ok, "{:?}", text_of(&out.block));
+    assert!(out.summary.starts_with("exit 2 in "), "{}", out.summary);
+    let (call, result) = h.pair("s1").await;
+    assert_eq!(h.blob(&call), serde_json::to_string(&input).unwrap());
+    assert_eq!(call.payload["risk"], "execute");
+    let blob = h.blob(&result).replace("\r\n", "\n");
+    assert!(blob.contains("[err]\nwarn\n"), "{blob}");
+    assert!(blob.contains("hello\n"), "{blob}");
+    assert!(
+        blob.lines().last().unwrap().starts_with("exit 2 · "),
+        "{blob}"
+    );
+    let meta = &result.payload["metadata"];
+    assert_eq!(meta["exit_code"], 2);
+    assert_eq!(meta["stdout_lines"], 1);
+    assert_eq!(meta["stderr_lines"], 1);
+    assert_eq!(meta["description"], "says hello");
+    // stdout and stderr are blobs of their own, named in the payload.
+    let attachments = result.payload["attachments"].as_array().unwrap();
+    let names: Vec<&str> = attachments
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["stdout", "stderr"]);
+    for a in attachments {
+        let id = BlobId::from(a["blob_id"].as_str().unwrap());
+        let bytes = h.store.read_blob(&id).unwrap();
+        let text = String::from_utf8(bytes).unwrap().replace("\r\n", "\n");
+        let expected = if a["name"] == "stdout" {
+            "hello\n"
+        } else {
+            "warn\n"
+        };
+        assert_eq!(text, expected);
+    }
+    let (mentor, is_error) = text_of(&out.block);
+    assert!(!is_error);
+    assert_eq!(mentor, h.blob(&result));
+
+    // A `cwd` outside the workspace is denied like any other path.
+    let denied = h
+        .run("s2", "shell", json!({"command": "echo hi", "cwd": ".."}))
+        .await;
+    assert_eq!(denied.kind, ToolResultKind::Denied);
+    h.close().await;
+}
+
+#[tokio::test]
 async fn read_only_file_tools_run_together_and_writes_after() {
     let h = Harness::new();
     let results = h

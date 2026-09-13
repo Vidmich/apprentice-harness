@@ -140,6 +140,7 @@ impl Tool for MockTool {
                 summary: String::new(),
                 metadata: Value::Null,
                 is_error: false,
+                attachments: Vec::new(),
             },
         };
         assert!(!ctx.call_id.is_empty());

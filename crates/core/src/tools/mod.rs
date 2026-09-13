@@ -17,8 +17,9 @@
 //! mentor asked.
 //!
 //! The file tools (M01-03) live in [`file`], the search tool (M01-04)
-//! in [`grep`]; shell and git arrive in M01-05..06; the loop that
-//! drives this is M01-08. [`builtin_tools`] is the lot.
+//! in [`grep`], the shell tools (M01-05) in [`shell`]; git arrives in
+//! M01-06; the loop that drives this is M01-08. [`builtin_tools`] is
+//! the lot.
 
 mod execute;
 pub mod file;
@@ -27,6 +28,7 @@ mod limits;
 mod registry;
 pub(crate) mod rpc;
 mod schema;
+pub mod shell;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -48,6 +50,7 @@ pub use limits::{OUTPUT_MEDIA_TYPE, Truncated, truncate_utf8};
 pub use registry::{RegistryError, ToolRegistry};
 pub use rpc::ToolsService;
 pub use schema::{ToolValidator, is_valid_name};
+pub use shell::shell_tools;
 
 use crate::config::ToolsConfig;
 use crate::trace::{AgentId, SessionId};
@@ -60,6 +63,7 @@ pub const MAX_SUMMARY_CHARS: usize = 120;
 pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
     let mut tools = file_tools();
     tools.extend(search_tools());
+    tools.extend(shell_tools());
     tools
 }
 
@@ -201,6 +205,9 @@ pub struct ToolContext {
     pub agent_id: AgentId,
     pub call_id: String,
     pub env: ToolEnv,
+    /// The session's `tools.*` config, for tools with settings of their
+    /// own (`tools.shell`).
+    pub config: Arc<ToolsConfig>,
     /// Files this agent has read, so a write can say when it overwrites
     /// something the mentor never looked at. Shared across the agent's
     /// steps by the runtime.
@@ -292,6 +299,18 @@ pub struct ToolOutput {
     pub metadata: Value,
     /// The tool ran but the mentor should treat the result as a failure.
     pub is_error: bool,
+    /// Further raw outputs stored as blobs of their own and listed in
+    /// the `tool.result` payload (`shell` keeps stdout and stderr apart
+    /// this way). The mentor never sees them.
+    pub attachments: Vec<Attachment>,
+}
+
+/// A named side output of a call; see [`ToolOutput::attachments`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attachment {
+    pub name: String,
+    pub media_type: String,
+    pub bytes: Vec<u8>,
 }
 
 impl ToolOutput {
@@ -301,6 +320,7 @@ impl ToolOutput {
             summary: String::new(),
             metadata: Value::Null,
             is_error: false,
+            attachments: Vec::new(),
         }
     }
 
@@ -310,6 +330,7 @@ impl ToolOutput {
             summary: String::new(),
             metadata: Value::Null,
             is_error: false,
+            attachments: Vec::new(),
         }
     }
 
@@ -330,6 +351,17 @@ impl ToolOutput {
     #[must_use]
     pub fn with_metadata(mut self, metadata: Value) -> Self {
         self.metadata = metadata;
+        self
+    }
+
+    /// Adds a text attachment (stored as [`OUTPUT_MEDIA_TYPE`]).
+    #[must_use]
+    pub fn with_text_attachment(mut self, name: impl Into<String>, bytes: Vec<u8>) -> Self {
+        self.attachments.push(Attachment {
+            name: name.into(),
+            media_type: OUTPUT_MEDIA_TYPE.to_owned(),
+            bytes,
+        });
         self
     }
 }
