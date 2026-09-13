@@ -1,23 +1,27 @@
 # M2 — Local inference service and model manager
 
-Outline only. Full task files are written when the milestone starts (after
-M01's two-week trial). Goal and exit criterion: `../../ROADMAP.md`.
-Spec: `SPEC.md` §7 (inference service), §8 (base model selection).
+Goal and exit criterion: `../../ROADMAP.md`. Spec: `SPEC.md` §7
+(inference service), §8 (base model selection). Task files written
+2026-09-13 (format: `../README.md`).
 
-## Planned tasks
+## Tasks
 
-| Id | Title | One-line goal |
-|---|---|---|
-| M02-01 | llama.cpp binding crate | `crates/llama/` (`apprentice-llama`): the only crate allowed `unsafe`; wraps llama.cpp via `llama-cpp-2` (or a vendored `llama-cpp-sys` build) with CUDA/Metal/Vulkan/CPU features; loads GGUF, tokenises, runs batched decode; builds on all three OSes. |
-| M02-02 | Hardware detection | Detect GPUs (VRAM, driver, backend availability), CPU cores/RAM; produce a `HardwareProfile` used to choose quantisation, GPU layers, context size and slot count; `harness doctor` shows it. |
-| M02-03 | Model manager and manifest | `<data_dir>/models/` with a `manifest.toml` per model/adapter: source URL, sha256, size, licence, quant, context, rated roles + eval scores; `harness models list\|pull\|remove\|assign <role> <model>`; resumable downloads from Hugging Face with verification. |
-| M02-04 | Inference service | Single in-daemon service: request queue with priorities and per-role latency budgets, N slots with continuous batching, prefix (KV) cache for role prompts, per-agent sequence reuse, cancellation, graceful model swap; `InferenceRequest {role, prompt, params, budget, priority}` → stream of tokens. |
-| M02-04b | Session state handle | `SessionState { append, generate, snapshot, restore, fork, drop }` (SPEC §7) over the service: one resident state per session for the observer (SPEC §5.0); KV-cache backend first (llama.cpp sequence copy / `llama_state_seq_*`), recurrent-state backend behind the same trait when a recurrent/hybrid model is loaded; snapshot bytes stored as trace blobs (kind `apprentice.state`); memory accounting per resident state and an eviction policy that demotes a session to the stateless fallback. |
-| M02-05 | Bypass and back-pressure | Deadline scheduling: a request that cannot start within its budget is rejected immediately (`Bypassed{reason}`) rather than queued; metrics for queue depth, bypass rate, p50/p95 per role; exposed via `stats.apprentice` (fills the shape reserved in M00-07). |
-| M02-06 | Small-model runners | ONNX Runtime (or `candle`) path for encoder/classifier models (rankers, gates) with millisecond latency; same `InferenceService` façade; model manifest supports `kind = "encoder"`. |
-| M02-07 | Load benchmark | `harness models bench --agents N --roles ...`: simulated multi-agent load replaying real prompt sizes from traces; reports tokens/s, slot utilisation, latencies, bypass rate; JSON output stored under `<data_dir>/bench/`. |
-| M02-08 | GUI model manager | Download/assign/remove models, hardware panel, live service metrics (queue, slots, bypass rate), warnings when VRAM is insufficient. |
-| M02-09 | Remote inference endpoint (optional) | The same service exposed over the RPC transport on a second machine (`inference.remote = "host:port"`), token-authenticated; defer if time is short (also listed under M10). |
+| Id | File | Size | Depends on |
+|---|---|---|---|
+| M02-01 | [llama.cpp binding crate](M02-01-llama-binding-crate.md) | L | M00-01, M00-12 |
+| M02-02 | [Hardware detection and the memory planner](M02-02-hardware-detection-and-planner.md) | S | M00-04, M02-01 |
+| M02-03 | [Model manager and manifest](M02-03-model-manager-and-manifest.md) | M | M00-03, M00-06, M02-02 |
+| M02-04 | [Inference service](M02-04-inference-service.md) | L | M02-01, M02-02, M02-03 |
+| M02-04b | [Session state handle](M02-04b-session-state-handle.md) | M | M02-04 |
+| M02-05 | [Bypass and back-pressure](M02-05-bypass-and-back-pressure.md) | S | M02-04 |
+| M02-06 | [Small-model runners (encoders and classifiers)](M02-06-small-model-runners.md) | M | M02-03, M02-04 |
+| M02-07 | [Load benchmark](M02-07-load-benchmark.md) | M | M02-04, M02-04b, M02-05 |
+| M02-08 | [GUI model manager](M02-08-gui-model-manager.md) | M | M01-12, M02-02, M02-03, M02-05, M02-07 |
+| M02-09 | [Remote inference endpoint (optional)](M02-09-remote-inference-endpoint.md) | M | M02-04, M02-05, M02-06 |
+
+Suggested order: 01 → 02 → 03 → 04 → 05 → 04b → 07 (first bench, exit
+criterion) → 06 → 08 → 09 (if time allows). The id `M02-04b` is kept
+because the M03/M04 outlines already reference it.
 
 ## Interfaces this milestone relies on (must exist from M00/M01)
 

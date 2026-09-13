@@ -1,25 +1,31 @@
 # M3 — Apprentice v0: prompted roles and protocol v1
 
-Outline only. Full task files are written when the milestone starts. Goal
-and exit criterion: `../../ROADMAP.md`. Spec: `SPEC.md` §4 (hook points),
-§5 (roles), §6 (mentor–apprentice protocol).
+Goal and exit criterion: `../../ROADMAP.md`. Spec: `SPEC.md` §4 (hook
+points), §5 (roles), §6 (mentor–apprentice protocol). Task files written
+2026-09-13 (format: `../README.md`).
 
-## Planned tasks
+## Tasks
 
-| Id | Title | One-line goal |
-|---|---|---|
-| M03-01 | Protocol v1 artifact | `protocol/v1/`: mentor system-prompt *addendum* (separate from the M01-09 baseline so A/B stays possible), apprentice role prompts, wire-format spec (`#ctx`, `#result`, `#state`, `#need`, `expand <id>`, `#ask-apprentice`), CHANGELOG; `protocol_version` recorded in every `mentor.request` payload. |
-| M03-02 | Apprentice orchestrator | Implements the `StepHooks` trait from M01-08: decides per step which roles run, enforces latency budgets via the inference service (M02-04/05), merges outputs into the request, records `apprentice.invocation` events with token deltas and bypass reasons; `--no-apprentice` / config toggle. Two role backends behind one interface: **observer** (primary, M03-02b) and **stateless** (fallback and A/B baseline); the active backend is recorded per invocation. |
-| M03-02b | Observer | Per-session resident `SessionState` (M02-04b) fed with every session event as it is appended to the trace (user text, mentor output, tool results — raw or by reference); roles are queries against it; `#state` answered from state; snapshot per step into the trace; fork on sub-agent spawn; automatic demotion to the stateless backend on eviction or error with a trace record. |
-| M03-03 | Role: output compressor | Prompted compression of tool results (shell, grep, read_file, diff) with type-specific prompts; **references-first** output (`blob:<id> L..`, `err:.. @ path:line`) expanded by the harness where verbatim text is needed, copies only on `#need raw`; raw blob stays retrievable by id; replaces the M01-01 head/tail truncation when enabled. |
-| M03-04 | `expand` by reference | Mentor tool `expand {result_id, range?}` returning the raw result (or a slice) from the trace blob; counts as a "regret" signal for the compressor when used. |
-| M03-05 | Repository index | Tree-sitter based symbol index (functions, types, imports) and chunking per file; incremental refresh from the workspace index (M01-02); query API used by the selector and later by the ranker (M06). |
-| M03-06 | Role: context selector | Prompted selection: given task + state + candidate chunks from the index, produce a ranked, budgeted `#ctx` block injected before the mentor call; ablation-friendly output (chunk ids kept in the trace). |
-| M03-07 | Role: history compactor | Prompted state document (`#state`) replacing older turns when history exceeds a threshold; keeps thinking-block and tool_use/tool_result integrity for the API; comparison hook against Anthropic server-side compaction for M04. |
-| M03-08 | Mid-conversation state injection | Use the API's mid-conversation `role: "system"` messages (Opus 5 supports them) for per-turn `#state`/`#ctx` so the cached prefix is never invalidated; fallback to a user-turn block on models without support. |
-| M03-09 | Local token estimation | Apprentice-side token counts (llama tokenizer) and estimated *saved* mentor input tokens per invocation (baseline size − sent size), labelled as estimates; feeds `stats.apprentice`. |
-| M03-10 | GUI: apprentice contribution view | Per step: which roles ran, latency, bypassed?, tokens before/after, expand-to-see the compressed vs raw result; session and day totals of estimated savings next to the cost panel (M01-13). |
-| M03-11 | Prompt iteration loop | `harness protocol diff\|bump`; every prompt change requires a CHANGELOG entry; once M04 exists, a replay evaluation run is attached to the entry. |
+| Id | File | Size | Depends on |
+|---|---|---|---|
+| M03-01 | [Protocol v1 artifact](M03-01-protocol-v1-artifact.md) | M | M01-09, M00-06 |
+| M03-02 | [Apprentice orchestrator](M03-02-apprentice-orchestrator.md) | L | M01-08, M02-04, M02-05, M03-01 |
+| M03-02b | [Observer](M03-02b-observer.md) | M | M02-04b, M03-02 |
+| M03-03 | [Role: output compressor](M03-03-role-output-compressor.md) | M | M03-02, M03-01, M01-01 |
+| M03-04 | [`expand` by reference](M03-04-expand-by-reference.md) | S | M01-01, M03-01 |
+| M03-05 | [Repository index](M03-05-repository-index.md) | M | M01-02 |
+| M03-06 | [Role: context selector](M03-06-role-context-selector.md) | M | M03-02, M03-05, M03-08 |
+| M03-07 | [Role: history compactor](M03-07-role-history-compactor.md) | M | M03-02, M03-08, M01-10 |
+| M03-08 | [Mid-conversation state injection](M03-08-mid-conversation-state-injection.md) | S | M03-01, M01-08 |
+| M03-09 | [Local token estimation](M03-09-local-token-estimation.md) | S | M03-02, M02-04, M01-13 |
+| M03-10 | [GUI: apprentice contribution view](M03-10-gui-apprentice-contribution-view.md) | M | M01-11, M01-13, M03-02, M03-09 |
+| M03-11 | [Prompt iteration loop](M03-11-prompt-iteration-loop.md) | S | M03-01, M03-02 |
+
+Suggested order: 01 → 04 → 02 → 03 (compressor live: first savings) →
+09 → 08 → 07 → 02b → 05 → 06 (disabled by default until M04's ablation)
+→ 10 → 11. The id `M03-02b` is kept because the M04 outline references
+it. Day-one roles per the decision below: compressor only; the compactor
+follows once M03-08's live cache check is in; the selector ships off.
 
 ## Interfaces this milestone relies on
 
