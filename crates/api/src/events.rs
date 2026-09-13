@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::jsonrpc::RpcError;
-use crate::types::Usage;
+use crate::types::{PermissionDecision, PermissionSource, RuleSpec, Usage};
 
 /// Notification method name carrying every event.
 pub const EVENT_METHOD: &str = "event";
@@ -106,13 +106,57 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         truncated: bool,
     },
+    /// The engine needs an answer: reply with `permission.respond`
+    /// before `timeout_s` run out (task M01-07).
     #[serde(rename = "permission.request")]
     PermissionRequest {
         request_id: String,
         agent_id: String,
         tool: String,
+        /// The input as it will run, long strings other than paths and
+        /// commands cut short.
         input: Value,
         risk: Risk,
+        /// One line for the prompt: the tool's own `description` when
+        /// the call has one, else the command or the paths.
+        #[serde(default)]
+        description: String,
+        /// The command that would run, whole (shell tools).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        /// The paths the call names, root-relative (absolute when
+        /// outside the workspace).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        paths: Vec<String>,
+        /// Rules an `allow_workspace` / `allow_always` / `deny_always`
+        /// answer would write, most specific first; the answer may
+        /// carry an edited one instead.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        suggested_rules: Vec<RuleSpec>,
+        /// Seconds until the request is denied as timed out.
+        #[serde(default)]
+        timeout_s: u64,
+    },
+    /// Every permission decision, asked or not; also lets a client
+    /// close a prompt another client answered.
+    #[serde(rename = "permission.decision")]
+    PermissionDecision {
+        agent_id: String,
+        call_id: String,
+        tool: String,
+        decision: PermissionDecision,
+        source: PermissionSource,
+        /// The `request_id` of the prompt this answers, when one was
+        /// shown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        /// `workspace:2`, `user:1`, `builtin:<name>`, `session:1`,
+        /// `default:<source>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule_ref: Option<String>,
+        /// Why, when denied.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     #[serde(rename = "log")]
     Log { level: LogLevel, message: String },

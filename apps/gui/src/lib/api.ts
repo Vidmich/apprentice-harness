@@ -76,6 +76,57 @@ export interface RunOptions {
   model?: string;
   effort?: Effort;
   apprentice?: boolean;
+  /** Absent = `permissions.default_mode` from config. */
+  permission_mode?: PermissionMode;
+}
+
+/** How the permission engine treats a run (task M01-07). */
+export type PermissionMode = "default" | "plan" | "auto";
+
+export type PermissionAnswer =
+  "allow_once" | "allow_session" | "allow_workspace" | "allow_always" | "deny_once" | "deny_always";
+
+export type PermissionDecision = "allow" | "deny";
+
+export type PermissionSource = "rule" | "user" | "session" | "mode" | "timeout" | "headless";
+
+export type RuleEffect = "allow" | "deny" | "ask";
+
+/** Conditions of a rule; every one given must hold. */
+export interface RuleMatch {
+  path?: string;
+  command_prefix?: string;
+  command_regex?: string;
+  outside_workspace?: boolean;
+  risk?: Risk;
+}
+
+/** One permission rule, as in `permissions.toml`. */
+export interface RuleSpec {
+  tool: string;
+  effect: RuleEffect;
+  match?: RuleMatch;
+}
+
+export type RuleSource = "workspace" | "user" | "builtin";
+
+export interface RuleInfo {
+  source: RuleSource;
+  index: number;
+  line?: number;
+  name?: string;
+  rule: RuleSpec;
+}
+
+export type RuleDefault = "ask" | "deny";
+
+export interface RuleFileInfo {
+  source: RuleSource;
+  path: string;
+  exists: boolean;
+  default?: RuleDefault;
+  /** Parse error naming file and line; every call is asked meanwhile. */
+  error?: string;
 }
 
 export interface StatsRange {
@@ -281,6 +332,39 @@ export interface ToolsListResult {
   tools: ToolInfo[];
 }
 
+export interface ToolsRulesParams {
+  workspace?: string;
+}
+
+export interface ToolsRulesResult {
+  /** Precedence order: workspace file, user file, built-ins. */
+  rules: RuleInfo[];
+  files: RuleFileInfo[];
+}
+
+export interface ToolsRuleParams {
+  tool: string;
+  match?: RuleMatch;
+  layer: ConfigLayer;
+  /** Required for the workspace layer. */
+  workspace?: string;
+}
+
+export interface ToolsRuleResult {
+  path: string;
+  line: number;
+  rule: RuleSpec;
+}
+
+// ---------------------------------------------------------------- permission.*
+
+export interface PermissionRespondParams {
+  request_id: string;
+  answer: PermissionAnswer;
+  /** The rule to write instead of the first suggested one. */
+  rule?: RuleSpec;
+}
+
 // ---------------------------------------------------------------- workspace.*
 
 export interface WorkspaceSummary {
@@ -340,6 +424,10 @@ export interface Methods {
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
   "tools.list": { params: ToolsListParams; result: ToolsListResult };
+  "tools.rules": { params: ToolsRulesParams; result: ToolsRulesResult };
+  "tools.allow": { params: ToolsRuleParams; result: ToolsRuleResult };
+  "tools.deny": { params: ToolsRuleParams; result: ToolsRuleResult };
+  "permission.respond": { params: PermissionRespondParams; result: Empty };
   "workspace.add": { params: WorkspaceAddParams; result: WorkspaceSummary };
   "workspace.list": { params: Empty; result: WorkspaceListResult };
   "workspace.remove": { params: WorkspaceIdParams; result: WorkspaceRemoveResult };
@@ -373,6 +461,10 @@ export const ALL_METHODS: readonly MethodName[] = [
   "stats.tokens",
   "stats.reprice",
   "tools.list",
+  "tools.rules",
+  "tools.allow",
+  "tools.deny",
+  "permission.respond",
   "workspace.add",
   "workspace.list",
   "workspace.remove",
@@ -413,8 +505,27 @@ export type KnownEvent =
       request_id: string;
       agent_id: string;
       tool: string;
+      /** The input as it will run; long strings other than paths and commands cut. */
       input: unknown;
       risk: Risk;
+      description?: string;
+      command?: string;
+      paths?: string[];
+      /** Rules an `allow_workspace`/`allow_always`/`deny_always` answer would write. */
+      suggested_rules?: RuleSpec[];
+      /** Seconds until the request is denied as timed out. */
+      timeout_s?: number;
+    }
+  | {
+      type: "permission.decision";
+      agent_id: string;
+      call_id: string;
+      tool: string;
+      decision: PermissionDecision;
+      source: PermissionSource;
+      request_id?: string;
+      rule_ref?: string;
+      reason?: string;
     }
   | { type: "log"; level: LogLevel; message: string };
 
@@ -429,6 +540,7 @@ export const KNOWN_EVENT_TYPES: readonly KnownEventType[] = [
   "agent.usage",
   "agent.finished",
   "permission.request",
+  "permission.decision",
   "log",
 ];
 
@@ -525,6 +637,9 @@ export function eventShapeError(event: Event): string | undefined {
         str("risk"),
         "input" in o ? undefined : "input",
       );
+    case "permission.decision":
+      if (!["allow", "deny"].includes(String(o.decision))) return "bad decision";
+      return first(str("agent_id"), str("call_id"), str("tool"), str("source"));
     case "log":
       return first(str("level"), str("message"));
   }

@@ -1,7 +1,7 @@
 //! State shared by everything one daemon process hosts (task M00-08):
 //! paths, the config loader, the trace store and its writer, the secret
 //! store, the lazily built mentor, the agent registry, the tool registry,
-//! the workspace registry and the shutdown token. RPC handlers are thin adapters over it; [`AppState::register`]
+//! the workspace registry, the permission broker and the shutdown token. RPC handlers are thin adapters over it; [`AppState::register`]
 //! wires all of them.
 
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{Config, ConfigError, ConfigLoader, ConfigService, Paths, secret_store};
 use crate::mentor::{AnthropicMentor, Mentor};
+use crate::permissions::{PermissionBroker, PermissionService};
 use crate::runtime::AgentRegistry;
 use crate::secrets::{ChainStore, SecretError, api_key_name};
 use crate::stats::StatsService;
@@ -60,6 +61,7 @@ pub struct AppState {
     agents: AgentRegistry,
     tools: Arc<ToolRegistry>,
     workspaces: Arc<Workspaces>,
+    permissions: Arc<PermissionBroker>,
     shutdown: CancellationToken,
 }
 
@@ -121,6 +123,7 @@ impl AppState {
             agents: AgentRegistry::new(),
             tools,
             workspaces,
+            permissions: Arc::new(PermissionBroker::new()),
             shutdown: CancellationToken::new(),
         }))
     }
@@ -165,6 +168,11 @@ impl AppState {
     /// The workspace registry and its open handles.
     pub fn workspaces(&self) -> &Arc<Workspaces> {
         &self.workspaces
+    }
+
+    /// Pending permission prompts and per-session answers.
+    pub fn permissions(&self) -> &Arc<PermissionBroker> {
+        &self.permissions
     }
 
     /// The current user-level config, read fresh (the loader is cheap and
@@ -257,7 +265,8 @@ impl AppState {
     }
 
     /// Registers every core handler: `config.*`, `auth.*`, `session.*`,
-    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`, `workspace.*`.
+    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`, `workspace.*`,
+    /// `permission.*`.
     /// `daemon.*` is the host's.
     pub fn register(self: &Arc<Self>, router: &mut Router) {
         crate::runtime::rpc::register(self, router);
@@ -278,6 +287,11 @@ impl AppState {
         .register(router);
         Arc::new(WorkspaceService::new(
             Arc::clone(&self.workspaces),
+            self.loader.clone(),
+        ))
+        .register(router);
+        Arc::new(PermissionService::new(
+            Arc::clone(&self.permissions),
             self.loader.clone(),
         ))
         .register(router);
@@ -423,11 +437,15 @@ mod tests {
                 "config.get",
                 "config.path",
                 "config.set",
+                "permission.respond",
                 "session.create",
                 "session.list",
                 "stats.reprice",
                 "stats.tokens",
+                "tools.allow",
+                "tools.deny",
                 "tools.list",
+                "tools.rules",
                 "trace.get",
                 "trace.list",
                 "workspace.add",

@@ -2,19 +2,25 @@
 //! as it arrives, tool activity and the closing usage line to stderr;
 //! `--json` prints one event per line followed by a `result` object.
 //! CTRL-C sends `agent.cancel` and waits for `agent.finished` (exit 130);
-//! a second CTRL-C gives up waiting.
+//! a second CTRL-C gives up waiting. A `permission.request` is put to
+//! the user on stderr and answered from a line of stdin (task M01-07);
+//! with `--json` it is denied at once, this being no place for a prompt.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Context as _;
-use apprentice_api::events::{AgentStatus, Event, LogLevel};
+use apprentice_api::events::{AgentStatus, Event, LogLevel, Risk};
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
-    AgentCancel, AgentIdParams, AgentRun, AgentRunParams, SessionCreate, SessionCreateParams,
+    AgentCancel, AgentIdParams, AgentRun, AgentRunParams, PermissionRespond,
+    PermissionRespondParams, SessionCreate, SessionCreateParams,
 };
-use apprentice_api::types::{Effort, RunOptions, Usage};
+use apprentice_api::types::{
+    Effort, PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource, RuleSpec,
+    RunOptions, Usage,
+};
 use apprentice_client::{ClientError, DaemonClient};
 use clap::{Args, ValueEnum};
 use serde::Serialize;
@@ -22,6 +28,7 @@ use serde::Serialize;
 use crate::config::workspace_string;
 use crate::daemon::with_client;
 use crate::stats::{thousands, usd};
+use crate::tools::{describe_rule, risk_name};
 use crate::{Ctx, Exit};
 
 #[derive(Debug, Args)]
@@ -30,6 +37,7 @@ Examples:
   harness run \"summarise the failing tests\"
   harness run --session 0192abc \"now fix the first one\"
   harness run --workspace ~/proj --effort high --no-apprentice \"review src/lib.rs\"
+  harness run --permission-mode plan \"how is the config loaded?\"
   harness --json run \"say hi\" | jq -c 'select(.type == \"result\")'")]
 pub struct RunArgs {
     /// The task for the mentor.
@@ -52,6 +60,28 @@ pub struct RunArgs {
     /// Also print the mentor's thinking, dimmed, on stderr.
     #[arg(long)]
     show_thinking: bool,
+    /// How tool calls are permitted: `default` (rules, then ask), `plan`
+    /// (read-only) or `auto` (writes inside the workspace without
+    /// asking). Default: `permissions.default_mode` from config.
+    #[arg(long, value_enum, value_name = "MODE")]
+    permission_mode: Option<PermissionModeArg>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PermissionModeArg {
+    Default,
+    Plan,
+    Auto,
+}
+
+impl From<PermissionModeArg> for PermissionMode {
+    fn from(m: PermissionModeArg) -> Self {
+        match m {
+            PermissionModeArg::Default => PermissionMode::Default,
+            PermissionModeArg::Plan => PermissionMode::Plan,
+            PermissionModeArg::Auto => PermissionMode::Auto,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -136,6 +166,7 @@ async fn stream(
             model: args.model.clone(),
             effort: args.effort.map(Effort::from),
             apprentice: args.no_apprentice.then_some(false),
+            permission_mode: args.permission_mode.map(PermissionMode::from),
         },
     };
     let (run, mut events) = client
@@ -146,6 +177,8 @@ async fn stream(
 
     let mut interrupts = Interrupts::new()?;
     let mut cancel_sent = false;
+    let mut stdin = StdinLines::default();
+    let mut prompt: Option<Prompt> = None;
     let mut usage = Usage::default();
     let mut cost: Option<f64> = None;
     let mut wrote_text = false;
@@ -153,6 +186,18 @@ async fn stream(
     let (status, error, truncated) = loop {
         let ev = tokio::select! {
             ev = events.next() => ev,
+            line = stdin.next(), if prompt.is_some() => {
+                let Some(p) = prompt.take() else { continue };
+                if let Some(answer) = parse_answer(line.as_deref()) {
+                    respond(client, out, &p, answer).await;
+                } else {
+                    out.info("  answer with one of a, s, w, A, d, D");
+                    eprint!("{PROMPT_OPTIONS}");
+                    crate::out::flush_stderr();
+                    prompt = Some(p);
+                }
+                continue;
+            }
             () = interrupts.recv() => {
                 if cancel_sent {
                     out.info("giving up waiting for the agent");
@@ -216,10 +261,61 @@ async fn stream(
                 truncated,
                 ..
             } => break (status, error, truncated),
-            Event::PermissionRequest { tool, .. } => {
-                out.info(format!(
-                    "permission requested for `{tool}` (not supported by the CLI yet)"
-                ));
+            Event::PermissionRequest {
+                request_id,
+                tool,
+                risk,
+                description,
+                suggested_rules,
+                timeout_s,
+                ..
+            } => {
+                let p = Prompt {
+                    request_id,
+                    tool,
+                    risk,
+                    description,
+                    rule: suggested_rules.into_iter().next(),
+                    timeout_s,
+                };
+                if out.json {
+                    // A script cannot answer: deny, and say so.
+                    out.info(format!("permission for {}: denied (--json)", p.description));
+                    respond(client, out, &p, PermissionAnswer::DenyOnce).await;
+                } else {
+                    if !at_line_start {
+                        println!();
+                        at_line_start = true;
+                    }
+                    eprint!("{}", p.text(out));
+                    crate::out::flush_stderr();
+                    prompt = Some(p);
+                }
+            }
+            Event::PermissionDecision {
+                request_id,
+                tool,
+                decision,
+                source,
+                reason,
+                ..
+            } => {
+                let answered_here = prompt
+                    .as_ref()
+                    .is_some_and(|p| request_id.as_deref() == Some(p.request_id.as_str()));
+                if answered_here {
+                    // Another client (the GUI) answered first.
+                    prompt = None;
+                    eprintln!();
+                    out.info(format!("  {tool}: {} elsewhere", decision_word(decision)));
+                } else if decision != PermissionDecision::Allow
+                    && !matches!(source, PermissionSource::User)
+                {
+                    out.info(format!(
+                        "✗ {tool}: {}",
+                        reason.unwrap_or_else(|| "denied".to_owned())
+                    ));
+                }
             }
             Event::Log { level, message } => {
                 let level = match level {
@@ -268,6 +364,131 @@ async fn stream(
         out.emit_json_line(&result)?;
     }
     Ok(result)
+}
+
+fn decision_word(d: PermissionDecision) -> &'static str {
+    match d {
+        PermissionDecision::Allow => "allowed",
+        PermissionDecision::Deny | _ => "denied",
+    }
+}
+
+/// A `permission.request` waiting for the user's line.
+struct Prompt {
+    request_id: String,
+    tool: String,
+    risk: Risk,
+    description: String,
+    /// What `w` and `A` would write.
+    rule: Option<RuleSpec>,
+    timeout_s: u64,
+}
+
+impl Prompt {
+    /// The whole prompt: what would run, the rule an answer would
+    /// write, the choices.
+    fn text(&self, out: crate::out::Out) -> String {
+        let mut s = format!(
+            "{} {} ({})\n",
+            out.bold("?"),
+            self.description,
+            risk_name(self.risk)
+        );
+        if self.description != self.tool && !self.description.starts_with(&self.tool) {
+            let _ = writeln!(s, "  tool: {}", self.tool);
+        }
+        if let Some(rule) = &self.rule {
+            let _ = writeln!(s, "  rule for w/A: {}", describe_rule(rule));
+        }
+        let _ = writeln!(s, "  (denied in {} s without an answer)", self.timeout_s);
+        s.push_str(PROMPT_OPTIONS);
+        s
+    }
+}
+
+const PROMPT_OPTIONS: &str =
+    "  [a]llow once / [s]ession / [w]orkspace / [A]lways / [d]eny / [D]eny always: ";
+
+/// `a s w A d D`; an empty line or EOF denies once.
+fn parse_answer(line: Option<&str>) -> Option<PermissionAnswer> {
+    let line = line.map_or("", str::trim);
+    Some(match line {
+        "" | "d" | "deny" | "n" | "no" => PermissionAnswer::DenyOnce,
+        "a" | "allow" | "y" | "yes" | "once" => PermissionAnswer::AllowOnce,
+        "s" | "session" => PermissionAnswer::AllowSession,
+        "w" | "workspace" => PermissionAnswer::AllowWorkspace,
+        "A" | "always" => PermissionAnswer::AllowAlways,
+        "D" | "never" => PermissionAnswer::DenyAlways,
+        _ => return None,
+    })
+}
+
+async fn respond(
+    client: &DaemonClient,
+    out: crate::out::Out,
+    p: &Prompt,
+    answer: PermissionAnswer,
+) {
+    let r = client
+        .call::<PermissionRespond>(PermissionRespondParams {
+            request_id: p.request_id.clone(),
+            answer,
+            rule: None,
+        })
+        .await;
+    match r {
+        Ok(_) => {
+            if !out.json {
+                let word = match answer {
+                    PermissionAnswer::AllowOnce => "allowed once",
+                    PermissionAnswer::AllowSession => "allowed for this session",
+                    PermissionAnswer::AllowWorkspace => "allowed in this workspace (rule written)",
+                    PermissionAnswer::AllowAlways => "always allowed (rule written)",
+                    PermissionAnswer::DenyOnce => "denied",
+                    PermissionAnswer::DenyAlways | _ => "always denied (rule written)",
+                };
+                out.info(format!("  {}: {word}", p.tool));
+            }
+        }
+        Err(e) => out.info(format!("  {}: answer not taken: {e}", p.tool)),
+    }
+}
+
+/// Lines of stdin, read on a thread started at the first prompt; `None`
+/// after EOF.
+#[derive(Default)]
+struct StdinLines {
+    rx: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    eof: bool,
+}
+
+impl StdinLines {
+    async fn next(&mut self) -> Option<String> {
+        if self.eof {
+            return None;
+        }
+        let rx = self.rx.get_or_insert_with(|| {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            std::thread::Builder::new()
+                .name("stdin".into())
+                .spawn(move || {
+                    use std::io::BufRead as _;
+                    for line in std::io::stdin().lock().lines() {
+                        let Ok(line) = line else { break };
+                        if tx.send(line).is_err() {
+                            break;
+                        }
+                    }
+                })
+                .expect("spawning the stdin thread");
+            rx
+        });
+        let line = rx.recv().await;
+        if line.is_none() {
+            self.eof = true;
+        }
+        line
+    }
 }
 
 fn status_word(s: AgentStatus) -> &'static str {

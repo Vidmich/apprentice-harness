@@ -86,6 +86,7 @@ mod tests {
             model: Some("claude-sonnet-5".into()),
             effort: Some(Effort::Low),
             apprentice: None,
+            permission_mode: None,
         };
         let req = build_request(&config, &opts, "x");
         assert_eq!(req.model, "claude-sonnet-5");

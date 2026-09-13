@@ -203,6 +203,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "libc",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

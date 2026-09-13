@@ -1,0 +1,85 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(PermissionRespondParams\n{\n    request_id: \"p1\".into(), answer: PermissionAnswer::AllowWorkspace, rule:\n    Some(RuleSpec\n    {\n        tool: \"shell\".into(), effect: RuleEffect::Allow, r#match: RuleMatch\n        { command_prefix: Some(\"cargo\".into()), ..RuleMatch::default() },\n    }),\n}, ToolsRulesParams { workspace: Some(\"/work/repo\".into()), },\nToolsRulesResult\n{\n    rules:\n    vec![RuleInfo\n    {\n        source: RuleSource::Workspace, index: 1, line: Some(3), name: None,\n        rule: RuleSpec\n        {\n            tool: \"write_file\".into(), effect: RuleEffect::Deny, r#match:\n            RuleMatch\n            {\n                path: Some(\"secrets/**\".into()), outside_workspace:\n                Some(false), ..RuleMatch::default()\n            },\n        },\n    }, RuleInfo\n    {\n        source: RuleSource::Builtin, index: 1, line: None, name:\n        Some(\"read_only_inside\".into()), rule: RuleSpec\n        {\n            tool: \"*\".into(), effect: RuleEffect::Allow, r#match: RuleMatch\n            {\n                risk: Some(Risk::ReadOnly), outside_workspace: Some(false),\n                ..RuleMatch::default()\n            },\n        },\n    },], files:\n    vec![RuleFileInfo\n    {\n        source: RuleSource::Workspace, path:\n        \"/work/repo/.harness/permissions.toml\".into(), exists: true, default:\n        Some(RuleDefault::Ask), error: None,\n    }, RuleFileInfo\n    {\n        source: RuleSource::User, path:\n        \"/home/u/.config/apprentice-harness/permissions.toml\".into(), exists:\n        true, default: None, error:\n        Some(\"/home/u/.config/apprentice-harness/permissions.toml:4: invalid string\".into()),\n    },],\n}, ToolsRuleParams\n{\n    tool: \"shell\".into(), r#match: RuleMatch\n    { command_regex: Some(r\"\\bgit\\s+push\\b\".into()), ..RuleMatch::default() },\n    layer: ConfigLayer::User, workspace: None,\n}, ToolsRuleResult\n{\n    path: \"/home/u/.config/apprentice-harness/permissions.toml\".into(), line:\n    9, rule: RuleSpec\n    {\n        tool: \"shell\".into(), effect: RuleEffect::Deny, r#match: RuleMatch\n        {\n            command_regex: Some(r\"\\bgit\\s+push\\b\".into()),\n            ..RuleMatch::default()\n        },\n    },\n}, RunOptions\n{ permission_mode: Some(PermissionMode::Plan), ..RunOptions::default() },)"
+---
+[
+  {
+    "request_id": "p1",
+    "answer": "allow_workspace",
+    "rule": {
+      "tool": "shell",
+      "effect": "allow",
+      "match": {
+        "command_prefix": "cargo"
+      }
+    }
+  },
+  {
+    "workspace": "/work/repo"
+  },
+  {
+    "rules": [
+      {
+        "source": "workspace",
+        "index": 1,
+        "line": 3,
+        "rule": {
+          "tool": "write_file",
+          "effect": "deny",
+          "match": {
+            "path": "secrets/**",
+            "outside_workspace": false
+          }
+        }
+      },
+      {
+        "source": "builtin",
+        "index": 1,
+        "name": "read_only_inside",
+        "rule": {
+          "tool": "*",
+          "effect": "allow",
+          "match": {
+            "outside_workspace": false,
+            "risk": "read_only"
+          }
+        }
+      }
+    ],
+    "files": [
+      {
+        "source": "workspace",
+        "path": "/work/repo/.harness/permissions.toml",
+        "exists": true,
+        "default": "ask"
+      },
+      {
+        "source": "user",
+        "path": "/home/u/.config/apprentice-harness/permissions.toml",
+        "exists": true,
+        "error": "/home/u/.config/apprentice-harness/permissions.toml:4: invalid string"
+      }
+    ]
+  },
+  {
+    "tool": "shell",
+    "match": {
+      "command_regex": "\\bgit\\s+push\\b"
+    },
+    "layer": "user"
+  },
+  {
+    "path": "/home/u/.config/apprentice-harness/permissions.toml",
+    "line": 9,
+    "rule": {
+      "tool": "shell",
+      "effect": "deny",
+      "match": {
+        "command_regex": "\\bgit\\s+push\\b"
+      }
+    }
+  },
+  {
+    "permission_mode": "plan"
+  }
+]

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::types::{
-    ConfigLayer, ConfigSource, EventSummary, RunOptions, SessionSummary, TokenStats, ToolInfo,
-    TraceEvent, WorkspaceSummary,
+    ConfigLayer, ConfigSource, EventSummary, PermissionAnswer, RuleFileInfo, RuleInfo, RuleMatch,
+    RuleSpec, RunOptions, SessionSummary, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -370,6 +370,76 @@ pub struct ToolsListResult {
 
 method!(ToolsList, "tools.list", ToolsListParams, ToolsListResult);
 
+/// `tools.rules`: the permission rules in force for `workspace` (task
+/// M01-07), in precedence order: workspace file, user file, built-ins.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ToolsRulesParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsRulesResult {
+    pub rules: Vec<RuleInfo>,
+    /// The workspace file (when a workspace was given) and the user file.
+    pub files: Vec<RuleFileInfo>,
+}
+
+method!(
+    ToolsRules,
+    "tools.rules",
+    ToolsRulesParams,
+    ToolsRulesResult
+);
+
+/// `tools.allow` / `tools.deny`: appends a rule to a rules file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsRuleParams {
+    /// Exact tool name or `*`.
+    pub tool: String,
+    #[serde(default, rename = "match", skip_serializing_if = "RuleMatch::is_empty")]
+    pub r#match: RuleMatch,
+    pub layer: ConfigLayer,
+    /// Required for the workspace layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolsRuleResult {
+    /// The file written.
+    pub path: String,
+    /// Line of the new `[[rule]]` header.
+    pub line: u64,
+    pub rule: RuleSpec,
+}
+
+method!(ToolsAllow, "tools.allow", ToolsRuleParams, ToolsRuleResult);
+method!(ToolsDeny, "tools.deny", ToolsRuleParams, ToolsRuleResult);
+
+// ------------------------------------------------------------ permission.*
+
+/// `permission.respond`: answers a `permission.request` event. The
+/// first answer wins; a later one (or one for an expired request) is
+/// `not_found`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionRespondParams {
+    pub request_id: String,
+    pub answer: PermissionAnswer,
+    /// The rule to write for `allow_workspace`, `allow_always` and
+    /// `deny_always` (default: the first suggested one, with the
+    /// answer's effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<RuleSpec>,
+}
+
+method!(
+    PermissionRespond,
+    "permission.respond",
+    PermissionRespondParams,
+    Empty
+);
+
 // ------------------------------------------------------------- workspace.*
 
 /// `workspace.add`: registers a root directory (idempotent: the same
@@ -482,6 +552,10 @@ pub const ALL_METHODS: &[&str] = &[
     StatsTokens::NAME,
     StatsReprice::NAME,
     ToolsList::NAME,
+    ToolsRules::NAME,
+    ToolsAllow::NAME,
+    ToolsDeny::NAME,
+    PermissionRespond::NAME,
     WorkspaceAdd::NAME,
     WorkspaceList::NAME,
     WorkspaceRemove::NAME,

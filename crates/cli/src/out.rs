@@ -252,6 +252,11 @@ pub fn flush() {
     let _ = std::io::stdout().flush();
 }
 
+/// Flushes stderr, for a prompt without a newline.
+pub fn flush_stderr() {
+    let _ = std::io::stderr().flush();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

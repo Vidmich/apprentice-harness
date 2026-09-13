@@ -6,13 +6,15 @@ use apprentice_api::events::{AgentStatus, Event, EventNotification, LogLevel, Ri
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
-    StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
-    TraceGetParams, TraceListParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
-    WorkspaceListResult, WorkspaceRemoveResult,
+    PermissionRespondParams, StatsRepriceParams, StatsRepriceResult, StatsTokensParams,
+    ToolsListParams, ToolsListResult, ToolsRuleParams, ToolsRuleResult, ToolsRulesParams,
+    ToolsRulesResult, TraceGetParams, TraceListParams, WorkspaceAddParams, WorkspaceIdParams,
+    WorkspaceInfoResult, WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
-    ApprenticeStats, ConfigLayer, Effort, RunOptions, StatsRange, TokenBucket, TokenStats,
-    ToolInfo, Usage, WorkspaceSummary,
+    ApprenticeStats, ConfigLayer, Effort, PermissionAnswer, PermissionDecision, PermissionMode,
+    PermissionSource, RuleDefault, RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource,
+    RuleSpec, RunOptions, StatsRange, TokenBucket, TokenStats, ToolInfo, Usage, WorkspaceSummary,
 };
 use insta::assert_json_snapshot;
 use serde_json::json;
@@ -62,7 +64,8 @@ fn method_param_shapes() {
             options: RunOptions {
                 model: None,
                 effort: Some(Effort::XHigh),
-                apprentice: Some(false)
+                apprentice: Some(false),
+                permission_mode: None,
             },
         }
     );
@@ -187,6 +190,108 @@ fn tools_shape() {
 }
 
 #[test]
+fn permission_shapes() {
+    assert_json_snapshot!(
+        "permissions",
+        (
+            PermissionRespondParams {
+                request_id: "p1".into(),
+                answer: PermissionAnswer::AllowWorkspace,
+                rule: Some(RuleSpec {
+                    tool: "shell".into(),
+                    effect: RuleEffect::Allow,
+                    r#match: RuleMatch {
+                        command_prefix: Some("cargo".into()),
+                        ..RuleMatch::default()
+                    },
+                }),
+            },
+            ToolsRulesParams {
+                workspace: Some("/work/repo".into()),
+            },
+            ToolsRulesResult {
+                rules: vec![
+                    RuleInfo {
+                        source: RuleSource::Workspace,
+                        index: 1,
+                        line: Some(3),
+                        name: None,
+                        rule: RuleSpec {
+                            tool: "write_file".into(),
+                            effect: RuleEffect::Deny,
+                            r#match: RuleMatch {
+                                path: Some("secrets/**".into()),
+                                outside_workspace: Some(false),
+                                ..RuleMatch::default()
+                            },
+                        },
+                    },
+                    RuleInfo {
+                        source: RuleSource::Builtin,
+                        index: 1,
+                        line: None,
+                        name: Some("read_only_inside".into()),
+                        rule: RuleSpec {
+                            tool: "*".into(),
+                            effect: RuleEffect::Allow,
+                            r#match: RuleMatch {
+                                risk: Some(Risk::ReadOnly),
+                                outside_workspace: Some(false),
+                                ..RuleMatch::default()
+                            },
+                        },
+                    },
+                ],
+                files: vec![
+                    RuleFileInfo {
+                        source: RuleSource::Workspace,
+                        path: "/work/repo/.harness/permissions.toml".into(),
+                        exists: true,
+                        default: Some(RuleDefault::Ask),
+                        error: None,
+                    },
+                    RuleFileInfo {
+                        source: RuleSource::User,
+                        path: "/home/u/.config/apprentice-harness/permissions.toml".into(),
+                        exists: true,
+                        default: None,
+                        error: Some(
+                            "/home/u/.config/apprentice-harness/permissions.toml:4: invalid string"
+                                .into()
+                        ),
+                    },
+                ],
+            },
+            ToolsRuleParams {
+                tool: "shell".into(),
+                r#match: RuleMatch {
+                    command_regex: Some(r"\bgit\s+push\b".into()),
+                    ..RuleMatch::default()
+                },
+                layer: ConfigLayer::User,
+                workspace: None,
+            },
+            ToolsRuleResult {
+                path: "/home/u/.config/apprentice-harness/permissions.toml".into(),
+                line: 9,
+                rule: RuleSpec {
+                    tool: "shell".into(),
+                    effect: RuleEffect::Deny,
+                    r#match: RuleMatch {
+                        command_regex: Some(r"\bgit\s+push\b".into()),
+                        ..RuleMatch::default()
+                    },
+                },
+            },
+            RunOptions {
+                permission_mode: Some(PermissionMode::Plan),
+                ..RunOptions::default()
+            },
+        )
+    );
+}
+
+#[test]
 fn workspace_shapes() {
     let summary = WorkspaceSummary {
         id: "w1".into(),
@@ -292,6 +397,28 @@ fn event_shapes() {
             tool: "shell".into(),
             input: json!({"command": "cargo test"}),
             risk: Risk::Execute,
+            description: "shell: cargo test".into(),
+            command: Some("cargo test".into()),
+            paths: vec![".".into()],
+            suggested_rules: vec![RuleSpec {
+                tool: "shell".into(),
+                effect: RuleEffect::Allow,
+                r#match: RuleMatch {
+                    command_prefix: Some("cargo test".into()),
+                    ..RuleMatch::default()
+                },
+            }],
+            timeout_s: 600,
+        },
+        Event::PermissionDecision {
+            agent_id: "a1".into(),
+            call_id: "c2".into(),
+            tool: "shell".into(),
+            decision: PermissionDecision::Deny,
+            source: PermissionSource::User,
+            request_id: Some("p1".into()),
+            rule_ref: None,
+            reason: Some("denied by user".into()),
         },
         Event::Log {
             level: LogLevel::Warn,

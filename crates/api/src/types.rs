@@ -111,6 +111,174 @@ pub struct RunOptions {
     /// `None` = use config (`apprentice.enabled`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apprentice: Option<bool>,
+    /// `None` = use config (`permissions.default_mode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+}
+
+/// How the permission engine treats a run (task M01-07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PermissionMode {
+    /// Rules decide; the client is asked for the rest.
+    #[default]
+    #[serde(alias = "ask")]
+    Default,
+    /// Read-only: every `write` and `execute` call is denied.
+    Plan,
+    /// `ask` counts as `allow` for writes inside the workspace; execute,
+    /// network and anything outside are still asked.
+    Auto,
+}
+
+/// A client's answer to a `permission.request`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PermissionAnswer {
+    AllowOnce,
+    /// Allow this and matching calls for the rest of the session.
+    AllowSession,
+    /// Write an allow rule to the workspace's `permissions.toml`.
+    AllowWorkspace,
+    /// Write an allow rule to the user's `permissions.toml`.
+    AllowAlways,
+    DenyOnce,
+    /// Write a deny rule to the user's `permissions.toml`.
+    DenyAlways,
+}
+
+/// What the engine decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PermissionDecision {
+    Allow,
+    Deny,
+}
+
+/// Who decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PermissionSource {
+    /// A rule from a file, a built-in, or the file's `default`.
+    Rule,
+    /// The client's answer to a prompt.
+    User,
+    /// An earlier `allow_session` answer in this session.
+    Session,
+    /// The run's `permission_mode` (`plan`, `auto`).
+    Mode,
+    /// Nobody answered within `permissions.ask_timeout_s`.
+    Timeout,
+    /// No client was attached; `permissions.headless` decided.
+    Headless,
+}
+
+/// What a rule does when it matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RuleEffect {
+    Allow,
+    Deny,
+    Ask,
+}
+
+/// Conditions of a rule; every one given must hold.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuleMatch {
+    /// Glob on the root-relative path of every path the call names
+    /// (`src/**`, `**` for anything under the root). A path outside
+    /// the workspace is matched, as an absolute `/` path, only by a
+    /// rule with `outside_workspace = true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The command (trimmed) is this, or starts with this followed by
+    /// whitespace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_prefix: Option<String>,
+    /// A regular expression found anywhere in the command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_regex: Option<String>,
+    /// `true` matches only calls naming a path outside the workspace,
+    /// `false` only calls that name none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside_workspace: Option<bool>,
+    /// The tool's risk class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<crate::events::Risk>,
+}
+
+impl RuleMatch {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// One permission rule, as in `permissions.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuleSpec {
+    /// Exact tool name or `*`.
+    pub tool: String,
+    pub effect: RuleEffect,
+    #[serde(default, rename = "match", skip_serializing_if = "RuleMatch::is_empty")]
+    pub r#match: RuleMatch,
+}
+
+/// Where a rule lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RuleSource {
+    Workspace,
+    User,
+    Builtin,
+}
+
+/// A rule as `tools.rules` lists it, with where it came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleInfo {
+    pub source: RuleSource,
+    /// 1-based position within its source; `source:index` is the
+    /// `rule_ref` of decision events.
+    pub index: usize,
+    /// Line of the `[[rule]]` header in the file, for file rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u64>,
+    /// Built-in rules have a name instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub rule: RuleSpec,
+}
+
+/// What a rules file says for calls no rule matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RuleDefault {
+    #[default]
+    Ask,
+    Deny,
+}
+
+/// One rules file as `tools.rules` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleFileInfo {
+    pub source: RuleSource,
+    pub path: String,
+    pub exists: bool,
+    /// The file's `default`, when it exists and parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<RuleDefault>,
+    /// Why the file is not in force (parse error, file and line named).
+    /// Every call is then asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Aggregated token statistics (see task M00-07).

@@ -355,6 +355,42 @@ mod tests {
     }
 
     #[test]
+    fn tools_rule_commands_parse() {
+        let c = Cli::try_parse_from([
+            "harness",
+            "tools",
+            "allow",
+            "shell",
+            "--command-prefix",
+            "cargo test",
+            "--user",
+        ])
+        .unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Tools(tools::ToolsCommand::Allow(_))
+        ));
+        let c =
+            Cli::try_parse_from(["harness", "tools", "deny", "read_file", "--outside"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Tools(tools::ToolsCommand::Deny(_))
+        ));
+        assert!(
+            Cli::try_parse_from(["harness", "tools", "deny", "x", "--outside", "--inside"])
+                .is_err()
+        );
+        let c = Cli::try_parse_from(["harness", "tools", "rules", "--user"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Tools(tools::ToolsCommand::Rules(_))
+        ));
+        let c = Cli::try_parse_from(["harness", "run", "--permission-mode", "plan", "x"]).unwrap();
+        assert!(matches!(c.command, Command::Run(_)));
+        assert!(Cli::try_parse_from(["harness", "run", "--permission-mode", "yolo", "x"]).is_err());
+    }
+
+    #[test]
     fn workspace_commands_parse() {
         let c = Cli::try_parse_from(["harness", "workspace", "add", ".", "--name", "x"]).unwrap();
         assert!(matches!(

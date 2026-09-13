@@ -1,22 +1,26 @@
 //! `harness run` against a fake daemon on a real local socket (task
 //! M00-09): streamed text, the usage line, `--json` NDJSON, an agent
-//! error, and CTRL-C → `agent.cancel` → exit 130. The real `agent.run`
-//! arrives with M00-11; this router only plays the protocol.
+//! error, CTRL-C → `agent.cancel` → exit 130, and the permission prompt
+//! answered from stdin (task M01-07). The real `agent.run` arrives with
+//! M00-11; this router only plays the protocol.
 
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use apprentice_api::events::{AgentStatus, Event};
+use apprentice_api::events::{AgentStatus, Event, Risk};
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
-    AgentCancel, AgentRun, AgentRunParams, AgentRunResult, Empty, SessionCreate,
-    SessionCreateResult,
+    AgentCancel, AgentRun, AgentRunParams, AgentRunResult, Empty, PermissionRespond,
+    PermissionRespondParams, SessionCreate, SessionCreateResult,
 };
 use apprentice_api::server::{Router, RouterConfig};
 use apprentice_api::transport::Endpoint;
-use apprentice_api::types::{Effort, RunOptions, Usage};
+use apprentice_api::types::{
+    Effort, PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource, RuleEffect,
+    RuleMatch, RuleSpec, RunOptions, Usage,
+};
 use apprentice_client::DaemonInfo;
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -38,22 +42,44 @@ struct Seen {
     runs: Vec<AgentRunParams>,
     cancels: Vec<String>,
     sessions_created: usize,
+    answers: Vec<PermissionRespondParams>,
 }
 
 /// Serves a router on `<home>/data` and writes its `daemon.json`. The
 /// prompt picks the script: `fail` ends in an error, `slow` streams for
-/// ten seconds unless cancelled, anything else says hello.
+/// ten seconds unless cancelled, `ask` (or `ask ask`, for two prompts)
+/// asks permission for a shell command and reports the answer, anything
+/// else says hello.
 fn fake_daemon(home: &Path) -> (Arc<Mutex<Seen>>, tokio::task::JoinHandle<()>) {
     let data = home.join("data");
     std::fs::create_dir_all(&data).unwrap();
     let seen = Arc::new(Mutex::new(Seen::default()));
     let cancel = Arc::new(Notify::new());
+    let answered = Arc::new(Notify::new());
 
     let mut router = Router::new(RouterConfig {
         daemon_version: "9.9.9".into(),
         pid: std::process::id(),
         token: Some("secret".into()),
     });
+    router.add::<PermissionRespond, _, _>({
+        let seen = Arc::clone(&seen);
+        let answered = Arc::clone(&answered);
+        move |_c, p: PermissionRespondParams| {
+            let seen = Arc::clone(&seen);
+            let answered = Arc::clone(&answered);
+            async move {
+                if p.request_id.starts_with("req-") {
+                    seen.lock().unwrap().answers.push(p);
+                    answered.notify_one();
+                    Ok(Empty {})
+                } else {
+                    Err(RpcError::not_found("no such request"))
+                }
+            }
+        }
+    });
+
     router.add::<SessionCreate, _, _>({
         let seen = Arc::clone(&seen);
         move |_c, _p| {
@@ -82,9 +108,11 @@ fn fake_daemon(home: &Path) -> (Arc<Mutex<Seen>>, tokio::task::JoinHandle<()>) {
     router.add::<AgentRun, _, _>({
         let seen = Arc::clone(&seen);
         let cancel = Arc::clone(&cancel);
+        let answered = Arc::clone(&answered);
         move |conn, p| {
             let seen = Arc::clone(&seen);
             let cancel = Arc::clone(&cancel);
+            let answered = Arc::clone(&answered);
             async move {
                 let script = p.prompt.clone();
                 seen.lock().unwrap().runs.push(p);
@@ -98,6 +126,86 @@ fn fake_daemon(home: &Path) -> (Arc<Mutex<Seen>>, tokio::task::JoinHandle<()>) {
                     };
                     let _ = conn.notify(&sub, started).await;
                     let (status, error) = match script.as_str() {
+                        s if s.starts_with("ask") => {
+                            for (i, _) in s.split_whitespace().enumerate() {
+                                let request_id = format!("req-{}", i + 1);
+                                let ask = Event::PermissionRequest {
+                                    request_id: request_id.clone(),
+                                    agent_id: a.clone(),
+                                    tool: "shell".into(),
+                                    input: serde_json::json!({"command": "cargo test -p core"}),
+                                    risk: Risk::Execute,
+                                    description: "shell: cargo test -p core".into(),
+                                    command: Some("cargo test -p core".into()),
+                                    paths: vec![".".into()],
+                                    suggested_rules: vec![RuleSpec {
+                                        tool: "shell".into(),
+                                        effect: RuleEffect::Allow,
+                                        r#match: RuleMatch {
+                                            command_prefix: Some("cargo test".into()),
+                                            ..RuleMatch::default()
+                                        },
+                                    }],
+                                    timeout_s: 600,
+                                };
+                                let _ = conn.notify(&sub, ask).await;
+                                let answer = tokio::select! {
+                                    () = answered.notified() => {
+                                        seen.lock().unwrap().answers.last().map(|p| p.answer)
+                                    }
+                                    () = tokio::time::sleep(Duration::from_secs(10)) => None,
+                                };
+                                let allowed = matches!(
+                                    answer,
+                                    Some(
+                                        PermissionAnswer::AllowOnce
+                                            | PermissionAnswer::AllowSession
+                                            | PermissionAnswer::AllowWorkspace
+                                            | PermissionAnswer::AllowAlways
+                                    )
+                                );
+                                let decision = Event::PermissionDecision {
+                                    agent_id: a.clone(),
+                                    call_id: format!("c{}", i + 1),
+                                    tool: "shell".into(),
+                                    decision: if allowed {
+                                        PermissionDecision::Allow
+                                    } else {
+                                        PermissionDecision::Deny
+                                    },
+                                    source: if answer.is_some() {
+                                        PermissionSource::User
+                                    } else {
+                                        PermissionSource::Timeout
+                                    },
+                                    request_id: Some(request_id),
+                                    rule_ref: None,
+                                    reason: (!allowed).then(|| "denied by user".to_owned()),
+                                };
+                                let _ = conn.notify(&sub, decision).await;
+                                let delta = Event::AgentTextDelta {
+                                    agent_id: a.clone(),
+                                    text: format!(
+                                        "{}\n",
+                                        if allowed { "ran it" } else { "did not run it" }
+                                    ),
+                                };
+                                let _ = conn.notify(&sub, delta).await;
+                            }
+                            // A denial by rule, without a prompt.
+                            let by_rule = Event::PermissionDecision {
+                                agent_id: a.clone(),
+                                call_id: "c9".into(),
+                                tool: "write_file".into(),
+                                decision: PermissionDecision::Deny,
+                                source: PermissionSource::Rule,
+                                request_id: None,
+                                rule_ref: Some("workspace:1".into()),
+                                reason: Some("denied by rule workspace:1 (write_file [path=secrets/**])".into()),
+                            };
+                            let _ = conn.notify(&sub, by_rule).await;
+                            (AgentStatus::Ok, None)
+                        }
                         "fail" => (
                             AgentStatus::Error,
                             Some(
@@ -296,6 +404,93 @@ async fn json_is_ndjson_ending_in_a_result() {
     })
     .await
     .unwrap();
+    serve.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn permission_prompts_are_answered_from_stdin() {
+    let home = tempfile::tempdir().unwrap();
+    let (seen, serve) = fake_daemon(home.path());
+    let home_path = home.path().to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        // One prompt, answered `a`; the prompt shows the command, the
+        // risk and the rule `w`/`A` would write.
+        harness(&home_path)
+            .args(["run", "--permission-mode", "auto", "ask"])
+            .write_stdin("a\n")
+            .assert()
+            .success()
+            .stdout("ran it\n")
+            .stderr(predicate::str::contains(
+                "? shell: cargo test -p core (execute)\n  rule for w/A: allow shell [command_prefix=\"cargo test\"]\n  (denied in 600 s without an answer)\n  [a]llow once / [s]ession / [w]orkspace / [A]lways / [d]eny / [D]eny always: ",
+            ))
+            .stderr(predicate::str::contains("  shell: allowed once\n"))
+            .stderr(predicate::str::contains(
+                "✗ write_file: denied by rule workspace:1 (write_file [path=secrets/**])\n",
+            ));
+
+        // Two prompts: a bad answer is asked again, `D` denies always;
+        // EOF on the second denies once.
+        harness(&home_path)
+            .args(["run", "ask ask"])
+            .write_stdin("x\nD\n")
+            .assert()
+            .success()
+            .stdout("did not run it\ndid not run it\n")
+            .stderr(predicate::str::contains("answer with one of a, s, w, A, d, D"))
+            .stderr(predicate::str::contains("shell: always denied (rule written)"))
+            .stderr(predicate::str::contains("shell: denied\n"));
+
+        // `--json`: no prompt, denied at once, the events still stream.
+        let out = harness(&home_path)
+            .args(["--json", "run", "ask"])
+            .write_stdin("a\n")
+            .assert()
+            .success()
+            .stderr(predicate::str::contains(
+                "permission for shell: cargo test -p core: denied (--json)",
+            ));
+        let stdout = String::from_utf8_lossy(&out.get_output().stdout);
+        let types: Vec<String> = stdout
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap()["type"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            types,
+            [
+                "agent.started",
+                "permission.request",
+                "permission.decision",
+                "agent.text_delta",
+                "permission.decision",
+                "agent.finished",
+                "result"
+            ]
+        );
+    })
+    .await
+    .unwrap();
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.runs[0].options.permission_mode,
+        Some(PermissionMode::Auto)
+    );
+    assert_eq!(seen.runs[1].options.permission_mode, None);
+    let answers: Vec<(&str, PermissionAnswer)> = seen
+        .answers
+        .iter()
+        .map(|p| (p.request_id.as_str(), p.answer))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            ("req-1", PermissionAnswer::AllowOnce),
+            ("req-1", PermissionAnswer::DenyAlways),
+            ("req-2", PermissionAnswer::DenyOnce),
+            ("req-1", PermissionAnswer::DenyOnce),
+        ]
+    );
+    assert!(seen.answers.iter().all(|p| p.rule.is_none()));
     serve.abort();
 }
 

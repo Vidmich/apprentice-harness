@@ -110,7 +110,8 @@ impl Executed {
     }
 }
 
-/// The permission hook. M01-07 implements it; until then [`AllowAll`].
+/// The permission hook: [`crate::permissions::PermissionGate`] in the
+/// runtime, [`AllowAll`] where nothing needs asking.
 #[async_trait]
 pub trait Gate: Send + Sync {
     /// `Err(reason)` refuses the call; `reason` is what the mentor reads
@@ -281,12 +282,12 @@ impl<'a> Executor<'a> {
         call: &ToolCall,
     ) -> Result<ToolOutput, ToolError> {
         entry.validator.validate(&call.input)?;
-        self.gate
-            .permit(ctx, &entry.spec, &call.input)
-            .await
-            .map_err(ToolError::Denied)?;
-        if self.cancel.is_cancelled() {
-            return Err(ToolError::Cancelled);
+        // The gate may wait on a person; cancellation ends the wait.
+        let permit = self.gate.permit(ctx, &entry.spec, &call.input);
+        tokio::select! {
+            biased;
+            () = self.cancel.cancelled() => return Err(ToolError::Cancelled),
+            r = permit => r.map_err(ToolError::Denied)?,
         }
         let token = self.cancel.child_token();
         let fut = entry.tool.call(ctx, call.input.clone(), token.clone());

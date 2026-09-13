@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use apprentice_api::types::Effort;
+use apprentice_api::types::{Effort, PermissionMode};
 use serde::{Deserialize, Serialize};
 
 /// The resolved configuration.
@@ -159,19 +159,43 @@ pub struct ApprenticeConfig {
     pub enabled: bool,
 }
 
+/// The permission engine (task M01-07). Workspace-overridable. The
+/// rules themselves live in `permissions.toml` next to the config file
+/// and in `<workspace>/.harness/permissions.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PermissionsConfig {
-    /// Reserved for the permission engine; validated there.
-    pub default_mode: String,
+    /// The `permission_mode` of a run that does not set one: `default`
+    /// (rules decide, the client is asked for the rest), `plan`
+    /// (writes and commands denied) or `auto` (writes inside the
+    /// workspace allowed without asking).
+    pub default_mode: PermissionMode,
+    /// How long a prompt waits for an answer before the call is denied.
+    pub ask_timeout_s: u64,
+    /// What happens to a call that would be asked when no client is
+    /// attached to the agent.
+    pub headless: Headless,
 }
 
 impl Default for PermissionsConfig {
     fn default() -> Self {
         Self {
-            default_mode: "ask".into(),
+            default_mode: PermissionMode::Default,
+            ask_timeout_s: 600,
+            headless: Headless::Deny,
         }
     }
+}
+
+/// `permissions.headless`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Headless {
+    /// Deny everything that would have been asked.
+    #[default]
+    Deny,
+    /// Allow read-only calls, deny the rest.
+    AllowReadonly,
 }
 
 /// Limits of the tool system (task M01-01). Workspace-overridable.

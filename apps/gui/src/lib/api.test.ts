@@ -114,7 +114,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(23);
+    expect(ALL_METHODS.length).toBe(27);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

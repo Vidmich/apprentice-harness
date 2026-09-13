@@ -123,6 +123,16 @@ export function applyEvent(run: RunState, ev: EventNotification, now: number): R
     }
     case "permission.request":
       return { ...next, activity: [...next.activity, `? permission: ${e.tool} (${e.risk})`] };
+    case "permission.decision":
+      return e.source === "rule" && e.decision === "allow"
+        ? next
+        : {
+            ...next,
+            activity: [
+              ...next.activity,
+              `${e.decision === "allow" ? "allowed" : "denied"} ${e.tool} (${e.source})`,
+            ],
+          };
     case "log":
       return { ...next, activity: [...next.activity, `${e.level}: ${e.message}`] };
   }
