@@ -24,8 +24,9 @@ pub use loader::{ConfigLoader, Resolved, Source};
 pub use rpc::{ConfigService, PROVIDERS};
 pub use schema::{
     ApprenticeConfig, Config, DaemonConfig, ENV_OVERRIDES, Headless, MentorConfig,
-    PermissionsConfig, Pricing, SecretStoreKind, ShellConfig, ThinkingDisplay, ToolTimeouts,
-    ToolsConfig, TraceConfig, WORKSPACE_OVERRIDABLE, default_pricing, workspace_overridable,
+    PermissionsConfig, Pricing, RuntimeConfig, SecretStoreKind, ShellConfig, ThinkingDisplay,
+    ToolTimeouts, ToolsConfig, TraceConfig, WORKSPACE_OVERRIDABLE, default_pricing,
+    workspace_overridable,
 };
 
 /// Builds the secret store chain selected by `daemon.secret_store`.

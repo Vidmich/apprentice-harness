@@ -250,6 +250,7 @@ async fn hello_round_trips_through_the_mentor_into_the_trace() {
                 types,
                 [
                     "agent.started",
+                    "agent.step",
                     "agent.text_delta",
                     "agent.text_delta",
                     "agent.text_delta",
@@ -285,14 +286,17 @@ async fn hello_round_trips_through_the_mentor_into_the_trace() {
                     "session.created",
                     "agent.started",
                     "user.message",
+                    "workspace.snapshot",
                     "mentor.request",
                     "mentor.response",
                     "assistant.message",
+                    "workspace.snapshot",
+                    "outcome",
                     "agent.finished",
                 ]
             );
             let seqs: Vec<u64> = events.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
-            assert_eq!(seqs, [1, 2, 3, 4, 5, 6, 7]);
+            assert_eq!(seqs, (1..=10).collect::<Vec<_>>());
             assert!(events[1..].iter().all(|e| e["agent_id"] == agent));
             let request_id = find(&events, "mentor.request")["id"].as_str().unwrap();
             let request = h.event(request_id, true);
@@ -396,8 +400,11 @@ async fn ctrl_c_cancels_the_run_and_the_trace_says_so() {
                     "session.created",
                     "agent.started",
                     "user.message",
+                    "workspace.snapshot",
                     "mentor.request",
                     "mentor.error",
+                    "workspace.snapshot",
+                    "outcome",
                     "agent.finished",
                 ]
             );
@@ -449,8 +456,11 @@ async fn an_authentication_error_is_exit_2_and_recorded() {
                     "session.created",
                     "agent.started",
                     "user.message",
+                    "workspace.snapshot",
                     "mentor.request",
                     "mentor.error",
+                    "workspace.snapshot",
+                    "outcome",
                     "agent.finished",
                 ]
             );
@@ -500,9 +510,9 @@ async fn two_concurrent_runs_are_two_agents_with_their_own_traces() {
             let mut agents = Vec::new();
             for (session, prompt) in [(&sa, "first"), (&sb, "second")] {
                 let events = h.events(session);
-                assert_eq!(events.len(), 7, "{:?}", kinds(&events));
+                assert_eq!(events.len(), 10, "{:?}", kinds(&events));
                 let seqs: Vec<u64> = events.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
-                assert_eq!(seqs, [1, 2, 3, 4, 5, 6, 7]);
+                assert_eq!(seqs, (1..=10).collect::<Vec<_>>());
                 let agent = events[1]["agent_id"].as_str().unwrap().to_owned();
                 assert!(events[1..].iter().all(|e| e["agent_id"] == agent));
                 let started = h.event(events[1]["id"].as_str().unwrap(), false);

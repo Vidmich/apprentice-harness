@@ -19,6 +19,7 @@ pub struct Config {
     pub apprentice: ApprenticeConfig,
     pub permissions: PermissionsConfig,
     pub tools: ToolsConfig,
+    pub runtime: RuntimeConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +33,12 @@ pub struct MentorConfig {
     pub base_url: String,
     pub timeout_s: u64,
     pub max_retries: u32,
+    /// Input tokens of a call (prompt plus cache reads) past which the
+    /// agent warns that the context is large (task M01-08).
+    pub context_soft_limit: u64,
+    /// Input tokens past which the agent stops with `context_limit`
+    /// rather than call again.
+    pub context_hard_limit: u64,
 }
 
 impl Default for MentorConfig {
@@ -45,6 +52,29 @@ impl Default for MentorConfig {
             base_url: "https://api.anthropic.com".into(),
             timeout_s: 600,
             max_retries: 4,
+            context_soft_limit: 600_000,
+            context_hard_limit: 900_000,
+        }
+    }
+}
+
+/// The agent loop (task M01-08). Workspace-overridable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeConfig {
+    /// Mentor calls one `agent.run` may make before it stops with
+    /// `max_iterations`.
+    pub max_iterations: u32,
+    /// Longest wait, in seconds, for a rate limit or an overload to
+    /// pass (beyond the adapter's own retries) before the run fails.
+    pub max_wait_s: u64,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 200,
+            max_wait_s: 300,
         }
     }
 }
@@ -313,6 +343,7 @@ pub const WORKSPACE_OVERRIDABLE: &[&str] = &[
     "apprentice.",
     "permissions.",
     "tools.",
+    "runtime.",
 ];
 
 /// Whether a dotted leaf key may appear in a workspace config.

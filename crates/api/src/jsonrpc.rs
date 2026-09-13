@@ -170,6 +170,9 @@ pub mod codes {
     pub const MENTOR_ERROR: i32 = -32020;
     pub const MENTOR_RATE_LIMITED: i32 = -32021;
     pub const CANCELLED: i32 = -32030;
+    /// The agent stopped short of `end_turn`: `data.kind` is `refusal`,
+    /// `max_iterations` or `context_limit`.
+    pub const AGENT_STOPPED: i32 = -32031;
     pub const PERMISSION_DENIED: i32 = -32040;
     pub const CONFIG_ERROR: i32 = -32050;
 }
@@ -252,6 +255,13 @@ impl RpcError {
 
     pub fn cancelled() -> Self {
         Self::new(codes::CANCELLED, "cancelled", "operation cancelled")
+    }
+
+    /// The agent ended because of `kind` (`refusal`, `max_iterations`,
+    /// `context_limit`) rather than an error of the mentor or the
+    /// daemon.
+    pub fn agent_stopped(kind: &str, message: impl Into<String>) -> Self {
+        Self::new(codes::AGENT_STOPPED, kind, message)
     }
 
     pub fn permission_denied(message: impl Into<String>) -> Self {

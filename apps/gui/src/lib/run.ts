@@ -25,6 +25,8 @@ export interface RunState {
   thinking: string;
   /** Tool activity and log lines, oldest first. */
   activity: string[];
+  /** The step the mentor is on (from `agent.step`), once known. */
+  step?: number;
   usage: Usage;
   /** Sum of `cost_usd` over the calls that reported one. */
   costUsd?: number;
@@ -97,12 +99,28 @@ export function applyEvent(run: RunState, ev: EventNotification, now: number): R
       return { ...next, text: next.text + e.text };
     case "agent.thinking_delta":
       return { ...next, thinking: next.thinking + e.text };
+    case "agent.step":
+      return e.phase === "mentor" ? { ...next, step: e.seq } : next;
     case "agent.tool_call":
       return { ...next, activity: [...next.activity, `→ ${e.name} ${compact(e.input)}`] };
+    case "agent.tool_progress":
+      // Streamed output is for the chat view (M01-11); the activity log
+      // keeps to one line per call.
+      return next;
     case "agent.tool_result":
       return {
         ...next,
         activity: [...next.activity, `← ${e.ok ? "ok" : "failed"} ${e.summary}`],
+      };
+    case "agent.warning":
+      return { ...next, activity: [...next.activity, `warning (${e.kind}): ${e.message}`] };
+    case "agent.waiting":
+      return {
+        ...next,
+        activity: [
+          ...next.activity,
+          `waiting ${Math.ceil(e.wait_ms / 1000)} s for the mentor (${e.reason})`,
+        ],
       };
     case "agent.usage": {
       const u = next.usage;

@@ -1,6 +1,8 @@
 //! `harness run "<prompt>"`: one agent run, streamed. Text goes to stdout
-//! as it arrives, tool activity and the closing usage line to stderr;
-//! `--json` prints one event per line followed by a `result` object.
+//! as it arrives, tool activity (calls, results, `--show-output` for
+//! what a running tool prints, warnings, waits) and the closing usage
+//! line to stderr; `--json` prints one event per line followed by a
+//! `result` object.
 //! CTRL-C sends `agent.cancel` and waits for `agent.finished` (exit 130);
 //! a second CTRL-C gives up waiting. A `permission.request` is put to
 //! the user on stderr and answered from a line of stdin (task M01-07);
@@ -60,6 +62,10 @@ pub struct RunArgs {
     /// Also print the mentor's thinking, dimmed, on stderr.
     #[arg(long)]
     show_thinking: bool,
+    /// Also print what running tools output (the shell's stdout and
+    /// stderr), dimmed, on stderr.
+    #[arg(long)]
+    show_output: bool,
     /// How tool calls are permitted: `default` (rules, then ask), `plan`
     /// (read-only) or `auto` (writes inside the workspace without
     /// asking). Default: `permissions.default_mode` from config.
@@ -239,10 +245,30 @@ async fn stream(
                 }
             }
             Event::AgentToolCall { name, input, .. } => {
+                if !at_line_start && !out.json {
+                    println!();
+                    at_line_start = true;
+                }
                 out.info(format!("→ {name} {}", compact(&input)));
+            }
+            Event::AgentToolProgress { text, .. } => {
+                if args.show_output && !out.quiet && !out.json {
+                    eprint!("{}", out.dim(&text));
+                }
             }
             Event::AgentToolResult { ok, summary, .. } => {
                 out.info(format!("← {} {summary}", if ok { "ok" } else { "failed" }));
+            }
+            Event::AgentWarning { kind, message, .. } => {
+                out.info(format!("warning ({kind}): {message}"));
+            }
+            Event::AgentWaiting {
+                reason, wait_ms, ..
+            } => {
+                out.info(format!(
+                    "waiting {} s for the mentor ({reason})",
+                    wait_ms.div_ceil(1000)
+                ));
             }
             Event::AgentUsage {
                 usage: u, cost_usd, ..

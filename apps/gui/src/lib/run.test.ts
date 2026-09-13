@@ -144,8 +144,47 @@ describe("run reducer", () => {
     run = applyEvent(run, ev("a", 2, result), 2);
     run = applyEvent(run, ev("a", 3, { type: "log", level: "warn", message: "slow" }), 3);
     run = applyEvent(run, ev("a", 4, { type: "agent.future_thing", x: 1 }), 4);
-    expect(run.activity).toEqual(['→ read_file {"path":"x"}', "← ok 12 lines", "warn: slow"]);
-    expect(run.lastSeq).toBe(4);
+    run = applyEvent(
+      run,
+      ev("a", 5, { type: "agent.step", agent_id: "a", seq: 2, phase: "mentor" }),
+      5,
+    );
+    run = applyEvent(
+      run,
+      ev("a", 6, {
+        type: "agent.tool_progress",
+        agent_id: "a",
+        call_id: "c",
+        stream: "stdout",
+        text: "...",
+      }),
+      6,
+    );
+    run = applyEvent(
+      run,
+      ev("a", 7, { type: "agent.warning", agent_id: "a", kind: "context_large", message: "big" }),
+      7,
+    );
+    run = applyEvent(
+      run,
+      ev("a", 8, {
+        type: "agent.waiting",
+        agent_id: "a",
+        reason: "rate_limited",
+        until: "2026-09-12T10:00:30.000Z",
+        wait_ms: 2500,
+      }),
+      8,
+    );
+    expect(run.activity).toEqual([
+      '→ read_file {"path":"x"}',
+      "← ok 12 lines",
+      "warn: slow",
+      "warning (context_large): big",
+      "waiting 3 s for the mentor (rate_limited)",
+    ]);
+    expect(run.step).toBe(2);
+    expect(run.lastSeq).toBe(8);
     const cancelled: Event = {
       type: "agent.finished",
       agent_id: "a",

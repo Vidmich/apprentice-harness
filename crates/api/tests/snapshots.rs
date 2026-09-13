@@ -2,7 +2,9 @@
 //! change: review the diff and bump `API_VERSION` if it is not additive.
 
 use apprentice_api::API_VERSION;
-use apprentice_api::events::{AgentStatus, Event, EventNotification, LogLevel, Risk};
+use apprentice_api::events::{
+    AgentStatus, Event, EventNotification, LogLevel, Risk, StepPhase, ToolStream,
+};
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
@@ -361,18 +363,31 @@ fn event_shapes() {
             agent_id: "a1".into(),
             text: "hmm".into(),
         },
+        Event::AgentStep {
+            agent_id: "a1".into(),
+            seq: 2,
+            phase: StepPhase::Tools,
+        },
         Event::AgentToolCall {
             agent_id: "a1".into(),
             call_id: "c1".into(),
             name: "read_file".into(),
             input: json!({"path": "src/main.rs"}),
         },
+        Event::AgentToolProgress {
+            agent_id: "a1".into(),
+            call_id: "c3".into(),
+            stream: ToolStream::Stderr,
+            text: "   Compiling core v0.1.0\n".into(),
+        },
         Event::AgentToolResult {
             agent_id: "a1".into(),
             call_id: "c1".into(),
+            name: "read_file".into(),
             ok: true,
             summary: "read 12 lines".into(),
             blob_id: Some("abc".into()),
+            mentor_bytes: 412,
         },
         Event::AgentUsage {
             agent_id: "a1".into(),
@@ -384,6 +399,24 @@ fn event_shapes() {
                 cache_creation_input_tokens: 900,
             },
             cost_usd: Some(0.0138),
+            session_usage: Usage {
+                input_tokens: 2408,
+                output_tokens: 620,
+                cache_read_input_tokens: 900,
+                cache_creation_input_tokens: 900,
+            },
+            session_cost_usd: Some(0.0276),
+        },
+        Event::AgentWarning {
+            agent_id: "a1".into(),
+            kind: "context_large".into(),
+            message: "the last call used 612000 input tokens (soft limit 600000)".into(),
+        },
+        Event::AgentWaiting {
+            agent_id: "a1".into(),
+            reason: "rate_limited".into(),
+            until: "2026-09-12T10:00:30.000Z".into(),
+            wait_ms: 30_000,
         },
         Event::AgentFinished {
             agent_id: "a1".into(),

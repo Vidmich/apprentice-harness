@@ -477,21 +477,50 @@ export const ALL_METHODS: readonly MethodName[] = [
 export type AgentStatus = "ok" | "cancelled" | "error";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type Risk = "read_only" | "write" | "execute" | "network";
+export type ToolStream = "stdout" | "stderr";
+export type StepPhase = "mentor" | "tools";
 
 export type KnownEvent =
   | { type: "agent.started"; agent_id: string; session_id: string }
   | { type: "agent.text_delta"; agent_id: string; text: string }
   | { type: "agent.thinking_delta"; agent_id: string; text: string }
+  /** A step of the loop begins a phase; `seq` counts the agent's steps from 1. */
+  | { type: "agent.step"; agent_id: string; seq: number; phase: StepPhase }
   | { type: "agent.tool_call"; agent_id: string; call_id: string; name: string; input: unknown }
+  /** Partial output of a running tool (the shell streams it). */
+  | {
+      type: "agent.tool_progress";
+      agent_id: string;
+      call_id: string;
+      stream: ToolStream;
+      text: string;
+    }
   | {
       type: "agent.tool_result";
       agent_id: string;
       call_id: string;
+      name?: string;
       ok: boolean;
       summary: string;
       blob_id?: string;
+      /** Length of the result text the mentor receives. */
+      mentor_bytes?: number;
     }
-  | { type: "agent.usage"; agent_id: string; call_id: string; usage: Usage; cost_usd?: number }
+  | {
+      type: "agent.usage";
+      agent_id: string;
+      call_id: string;
+      usage: Usage;
+      cost_usd?: number;
+      /** Running totals of the session, this call included. */
+      session_usage?: Usage;
+      /** Running cost of the session; absent when a call was unpriced. */
+      session_cost_usd?: number;
+    }
+  /** `context_large`, `tools_changed`, `stream_interrupted`: worth showing, not fatal. */
+  | { type: "agent.warning"; agent_id: string; kind: string; message: string }
+  /** The agent waits before calling again (`rate_limited`, `overloaded`); `until` is RFC 3339. */
+  | { type: "agent.waiting"; agent_id: string; reason: string; until: string; wait_ms: number }
   | {
       type: "agent.finished";
       agent_id: string;
@@ -535,9 +564,13 @@ export const KNOWN_EVENT_TYPES: readonly KnownEventType[] = [
   "agent.started",
   "agent.text_delta",
   "agent.thinking_delta",
+  "agent.step",
   "agent.tool_call",
+  "agent.tool_progress",
   "agent.tool_result",
   "agent.usage",
+  "agent.warning",
+  "agent.waiting",
   "agent.finished",
   "permission.request",
   "permission.decision",
@@ -599,6 +632,10 @@ export function eventShapeError(event: Event): string | undefined {
     case "agent.text_delta":
     case "agent.thinking_delta":
       return first(str("agent_id"), str("text"));
+    case "agent.step":
+      if (typeof o.seq !== "number") return "seq must be a number";
+      if (!["mentor", "tools"].includes(String(o.phase))) return "bad phase";
+      return str("agent_id");
     case "agent.tool_call":
       return first(
         str("agent_id"),
@@ -606,8 +643,16 @@ export function eventShapeError(event: Event): string | undefined {
         str("name"),
         "input" in o ? undefined : "input",
       );
+    case "agent.tool_progress":
+      if (!["stdout", "stderr"].includes(String(o.stream))) return "bad stream";
+      return first(str("agent_id"), str("call_id"), str("text"));
     case "agent.tool_result":
       return first(str("agent_id"), str("call_id"), bool("ok"), str("summary"));
+    case "agent.warning":
+      return first(str("agent_id"), str("kind"), str("message"));
+    case "agent.waiting":
+      if (typeof o.wait_ms !== "number") return "wait_ms must be a number";
+      return first(str("agent_id"), str("reason"), str("until"));
     case "agent.usage": {
       const u = o.usage as Record<string, unknown> | undefined;
       if (typeof u !== "object" || u === null) return "usage must be an object";

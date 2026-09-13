@@ -259,7 +259,19 @@ async fn a_round_trip_streams_text_and_records_the_exchange() {
     );
     assert_eq!(wire["thinking"]["type"], "adaptive");
     assert_eq!(wire["output_config"]["effort"], "high");
-    assert!(wire.get("tools").is_none());
+    // The tool set, sorted, with the breakpoint on the last one.
+    let tools = wire["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted);
+    assert!(names.contains(&"read_file"));
+    assert_eq!(tools.last().unwrap()["cache_control"]["type"], "ephemeral");
+    assert!(tools[0].get("cache_control").is_none());
+    assert_eq!(
+        request.payload["tool_names"].as_array().unwrap().len(),
+        names.len()
+    );
 
     let response = find(&trace, kinds::MENTOR_RESPONSE);
     assert_eq!(response.payload["usage"]["input_tokens"], 25);
@@ -648,10 +660,16 @@ async fn cancel_and_subscribe_over_rpc() {
             ..
         }
     ));
-    // The late subscriber saw the end too (and nothing before its start).
+    // The late subscriber saw the end too (and only what happened
+    // after its start: at most the step opening, then the end).
     let seen = drain(&mut attached).await;
-    assert_eq!(seen.len(), 1, "{seen:?}");
-    assert!(seen[0].event.is_terminal());
+    assert!(seen.len() <= 2, "{seen:?}");
+    assert!(seen.last().unwrap().event.is_terminal());
+    assert!(
+        seen[..seen.len() - 1]
+            .iter()
+            .all(|n| matches!(n.event, Event::AgentStep { .. }))
+    );
 
     // Cancelling again is harmless; subscribing after the end replays
     // only the terminal event, from the trace.

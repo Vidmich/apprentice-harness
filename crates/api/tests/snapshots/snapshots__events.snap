@@ -34,6 +34,16 @@ expression: notifications
     "subscription": "a1",
     "seq": 4,
     "event": {
+      "type": "agent.step",
+      "agent_id": "a1",
+      "seq": 2,
+      "phase": "tools"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 5,
+    "event": {
       "type": "agent.tool_call",
       "agent_id": "a1",
       "call_id": "c1",
@@ -45,19 +55,32 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 5,
+    "seq": 6,
     "event": {
-      "type": "agent.tool_result",
+      "type": "agent.tool_progress",
       "agent_id": "a1",
-      "call_id": "c1",
-      "ok": true,
-      "summary": "read 12 lines",
-      "blob_id": "abc"
+      "call_id": "c3",
+      "stream": "stderr",
+      "text": "   Compiling core v0.1.0\n"
     }
   },
   {
     "subscription": "a1",
-    "seq": 6,
+    "seq": 7,
+    "event": {
+      "type": "agent.tool_result",
+      "agent_id": "a1",
+      "call_id": "c1",
+      "name": "read_file",
+      "ok": true,
+      "summary": "read 12 lines",
+      "blob_id": "abc",
+      "mentor_bytes": 412
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 8,
     "event": {
       "type": "agent.usage",
       "agent_id": "a1",
@@ -68,12 +91,40 @@ expression: notifications
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 900
       },
-      "cost_usd": 0.0138
+      "cost_usd": 0.0138,
+      "session_usage": {
+        "input_tokens": 2408,
+        "output_tokens": 620,
+        "cache_read_input_tokens": 900,
+        "cache_creation_input_tokens": 900
+      },
+      "session_cost_usd": 0.0276
     }
   },
   {
     "subscription": "a1",
-    "seq": 7,
+    "seq": 9,
+    "event": {
+      "type": "agent.warning",
+      "agent_id": "a1",
+      "kind": "context_large",
+      "message": "the last call used 612000 input tokens (soft limit 600000)"
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 10,
+    "event": {
+      "type": "agent.waiting",
+      "agent_id": "a1",
+      "reason": "rate_limited",
+      "until": "2026-09-12T10:00:30.000Z",
+      "wait_ms": 30000
+    }
+  },
+  {
+    "subscription": "a1",
+    "seq": 11,
     "event": {
       "type": "agent.finished",
       "agent_id": "a1",
@@ -89,7 +140,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 8,
+    "seq": 12,
     "event": {
       "type": "permission.request",
       "request_id": "p1",
@@ -118,7 +169,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 9,
+    "seq": 13,
     "event": {
       "type": "permission.decision",
       "agent_id": "a1",
@@ -132,7 +183,7 @@ expression: notifications
   },
   {
     "subscription": "a1",
-    "seq": 10,
+    "seq": 14,
     "event": {
       "type": "log",
       "level": "warn",

@@ -37,14 +37,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use apprentice_api::events::Risk;
+pub use apprentice_api::events::{Risk, ToolStream};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub use execute::{AllowAll, Executed, Executor, Gate, ToolCall, ToolResultKind};
+pub use execute::{AllowAll, Executed, Executor, Gate, Observer, ToolCall, ToolResultKind};
 pub use file::file_tools;
 pub use git::git_tools;
 pub use grep::search_tools;
@@ -428,6 +428,15 @@ impl ToolError {
             Self::Cancelled => "cancelled",
             Self::Io(_) => "io",
             Self::Failed(_) => "failed",
+        }
+    }
+}
+
+impl From<ProgressStream> for ToolStream {
+    fn from(s: ProgressStream) -> Self {
+        match s {
+            ProgressStream::Stdout => Self::Stdout,
+            ProgressStream::Stderr => Self::Stderr,
         }
     }
 }

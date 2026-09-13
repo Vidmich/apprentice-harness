@@ -44,6 +44,26 @@ pub enum LogLevel {
     Error,
 }
 
+/// Which output stream a `agent.tool_progress` chunk came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolStream {
+    Stdout,
+    Stderr,
+}
+
+/// Which half of a step an `agent.step` event opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum StepPhase {
+    /// The mentor is being called.
+    Mentor,
+    /// The tools it asked for are running.
+    Tools,
+}
+
 /// Tool risk class (defined here so events can carry it before M01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +89,16 @@ pub enum Event {
     AgentTextDelta { agent_id: String, text: String },
     #[serde(rename = "agent.thinking_delta")]
     AgentThinkingDelta { agent_id: String, text: String },
+    /// One step of the loop begins a phase (task M01-08): `mentor`
+    /// when the call goes out, `tools` when the calls it asked for
+    /// start. `seq` counts the agent's steps from 1.
+    #[serde(rename = "agent.step")]
+    AgentStep {
+        agent_id: String,
+        seq: u64,
+        phase: StepPhase,
+    },
+    /// A `tool_use` block is complete: the tool is about to run.
     #[serde(rename = "agent.tool_call")]
     AgentToolCall {
         agent_id: String,
@@ -76,14 +106,27 @@ pub enum Event {
         name: String,
         input: Value,
     },
+    /// Partial output of a running tool (the shell streams it).
+    #[serde(rename = "agent.tool_progress")]
+    AgentToolProgress {
+        agent_id: String,
+        call_id: String,
+        stream: ToolStream,
+        text: String,
+    },
     #[serde(rename = "agent.tool_result")]
     AgentToolResult {
         agent_id: String,
         call_id: String,
+        #[serde(default)]
+        name: String,
         ok: bool,
         summary: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         blob_id: Option<String>,
+        /// Length of the result text the mentor receives.
+        #[serde(default)]
+        mentor_bytes: u64,
     },
     #[serde(rename = "agent.usage")]
     AgentUsage {
@@ -94,6 +137,32 @@ pub enum Event {
         /// the model has no entry.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_usd: Option<f64>,
+        /// Running totals of the session, this call included.
+        #[serde(default)]
+        session_usage: Usage,
+        /// Running cost of the session; absent when any of its calls
+        /// was unpriced.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd: Option<f64>,
+    },
+    /// Something the user should know that does not end the run:
+    /// `context_large` (the last call's input passed
+    /// `mentor.context_soft_limit`), `tools_changed` (the tool set
+    /// changed mid-session, which breaks the cache).
+    #[serde(rename = "agent.warning")]
+    AgentWarning {
+        agent_id: String,
+        kind: String,
+        message: String,
+    },
+    /// The agent is waiting before it calls the mentor again: `reason`
+    /// is `rate_limited` or `overloaded`, `until` an RFC 3339 time.
+    #[serde(rename = "agent.waiting")]
+    AgentWaiting {
+        agent_id: String,
+        reason: String,
+        until: String,
+        wait_ms: u64,
     },
     #[serde(rename = "agent.finished")]
     AgentFinished {

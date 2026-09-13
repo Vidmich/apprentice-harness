@@ -131,6 +131,10 @@ impl Gate for AllowAll {
     }
 }
 
+/// Called with every call the moment it is done (results of a batch
+/// come back together; this is how the runtime reports them live).
+pub type Observer = dyn Fn(&Executed) + Send + Sync;
+
 /// Executes the calls of one step. Built per step by the runtime.
 pub struct Executor<'a> {
     registry: &'a ToolRegistry,
@@ -142,6 +146,7 @@ pub struct Executor<'a> {
     workspace: Option<Arc<Workspace>>,
     seen: Arc<SeenFiles>,
     progress: mpsc::Sender<ToolProgress>,
+    observer: Option<Box<Observer>>,
 }
 
 impl std::fmt::Debug for Executor<'_> {
@@ -177,6 +182,7 @@ impl<'a> Executor<'a> {
             workspace: None,
             seen: Arc::new(SeenFiles::new()),
             progress,
+            observer: None,
         }
     }
 
@@ -197,6 +203,13 @@ impl<'a> Executor<'a> {
     #[must_use]
     pub fn with_progress(mut self, progress: mpsc::Sender<ToolProgress>) -> Self {
         self.progress = progress;
+        self
+    }
+
+    /// Told of every executed call as it finishes.
+    #[must_use]
+    pub fn with_observer(mut self, observer: Box<Observer>) -> Self {
+        self.observer = Some(observer);
         self
     }
 
@@ -271,8 +284,13 @@ impl<'a> Executor<'a> {
             Some(entry) => self.run(entry, &ctx, &call).await,
         };
         let duration = started.elapsed();
-        self.finish(&call, &ctx, outcome, duration, spec.as_ref())
-            .await
+        let executed = self
+            .finish(&call, &ctx, outcome, duration, spec.as_ref())
+            .await;
+        if let Some(observer) = &self.observer {
+            observer(&executed);
+        }
+        executed
     }
 
     async fn run(
