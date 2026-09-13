@@ -1,0 +1,70 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(TraceReplayCheckParams\n{\n    session_id: Some(\"s1\".into()), agent_id: None, call_id: None, rebuild:\n    true,\n}, ReplayReport\n{\n    calls:\n    vec![ReplayCall\n    {\n        call_id: \"m1\".into(), session_id: \"s1\".into(), agent_id: \"a1\".into(),\n        step_id: \"st1\".into(), kind: \"step\".into(), request_event_id:\n        \"e7\".into(), status: ReplayStatus::Ok, checks:\n        [\"blob\", \"hash\", \"parse\", \"canonical\",\n        \"rebuild\"].map(String::from).to_vec(), problems: vec![],\n    }, ReplayCall\n    {\n        call_id: \"m2\".into(), session_id: \"s1\".into(), agent_id: \"a1\".into(),\n        step_id: \"st2\".into(), kind: \"step\".into(), request_event_id:\n        \"e12\".into(), status: ReplayStatus::Failed, checks:\n        [\"blob\", \"hash\"].map(String::from).to_vec(), problems:\n        vec![\"body hashes to bbbb, not its id aaaa\".into()],\n    }, ReplayCall\n    {\n        call_id: \"m3\".into(), session_id: \"s1\".into(), agent_id: \"a1\".into(),\n        step_id: \"st3\".into(), kind: \"title\".into(), request_event_id:\n        \"e20\".into(), status: ReplayStatus::Skipped, checks:\n        [\"blob\", \"hash\", \"parse\", \"canonical\",\n        \"rebuild\"].map(String::from).to_vec(), problems:\n        vec![\"rebuild skipped: a `title` call is not built from the conversation\".into(),],\n    },], checked: 3, passed: 1, failed: 1, skipped: 1, rebuild: true,\n})"
+---
+[
+  {
+    "session_id": "s1",
+    "rebuild": true
+  },
+  {
+    "calls": [
+      {
+        "call_id": "m1",
+        "session_id": "s1",
+        "agent_id": "a1",
+        "step_id": "st1",
+        "kind": "step",
+        "request_event_id": "e7",
+        "status": "ok",
+        "checks": [
+          "blob",
+          "hash",
+          "parse",
+          "canonical",
+          "rebuild"
+        ]
+      },
+      {
+        "call_id": "m2",
+        "session_id": "s1",
+        "agent_id": "a1",
+        "step_id": "st2",
+        "kind": "step",
+        "request_event_id": "e12",
+        "status": "failed",
+        "checks": [
+          "blob",
+          "hash"
+        ],
+        "problems": [
+          "body hashes to bbbb, not its id aaaa"
+        ]
+      },
+      {
+        "call_id": "m3",
+        "session_id": "s1",
+        "agent_id": "a1",
+        "step_id": "st3",
+        "kind": "title",
+        "request_event_id": "e20",
+        "status": "skipped",
+        "checks": [
+          "blob",
+          "hash",
+          "parse",
+          "canonical",
+          "rebuild"
+        ],
+        "problems": [
+          "rebuild skipped: a `title` call is not built from the conversation"
+        ]
+      }
+    ],
+    "checked": 3,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 1,
+    "rebuild": true
+  }
+]

@@ -32,6 +32,74 @@ fn default_effort() -> Effort {
     Effort::High
 }
 
+/// The body of `POST /v1/messages` as sent: a [`MentorRequest`] in the
+/// API's shape, serialised deterministically (fixed field order, no
+/// whitespace) by [`request_body`]. The trace stores these bytes as the
+/// `mentor.request` blob; `replay-check` (task M01-14) parses them back
+/// and expects [`request_body`] to return the same bytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WireRequest {
+    pub model: String,
+    pub max_tokens: u32,
+    pub stream: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system: Vec<SystemBlock>,
+    pub messages: Vec<Message>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<ToolDef>,
+    #[serde(default)]
+    pub thinking: Thinking,
+    pub output_config: OutputConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+/// `output_config` of the wire body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputConfig {
+    pub effort: Effort,
+}
+
+impl From<&MentorRequest> for WireRequest {
+    fn from(req: &MentorRequest) -> Self {
+        Self {
+            model: req.model.clone(),
+            max_tokens: req.max_tokens,
+            stream: true,
+            system: req.system.clone(),
+            messages: req.messages.clone(),
+            tools: req.tools.clone(),
+            thinking: req.thinking,
+            output_config: OutputConfig { effort: req.effort },
+            metadata: req.metadata.clone(),
+        }
+    }
+}
+
+impl WireRequest {
+    /// The request the body was built from.
+    pub fn into_request(self) -> MentorRequest {
+        MentorRequest {
+            model: self.model,
+            max_tokens: self.max_tokens,
+            system: self.system,
+            messages: self.messages,
+            tools: self.tools,
+            thinking: self.thinking,
+            effort: self.output_config.effort,
+            metadata: self.metadata,
+        }
+    }
+}
+
+/// The exact bytes the mentor sends for `req` (see [`WireRequest`]).
+///
+/// # Errors
+/// Serialisation failure (does not happen for well-formed types).
+pub fn request_body(req: &MentorRequest) -> serde_json::Result<Vec<u8>> {
+    serde_json::to_vec(&WireRequest::from(req))
+}
+
 /// A system prompt block. `cache` renders as a cache breakpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename = "text")]

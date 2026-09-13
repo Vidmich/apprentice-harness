@@ -431,7 +431,7 @@ pub(super) struct Prepared {
 
 pub struct TraceStore {
     conn: Mutex<Connection>,
-    files: BlobFiles,
+    pub(super) files: BlobFiles,
     db_path: PathBuf,
     inline_max: usize,
 }

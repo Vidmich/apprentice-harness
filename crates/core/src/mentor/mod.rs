@@ -19,7 +19,7 @@ pub use sse::{SseEvent, SseParser};
 pub use types::{
     CacheFlag, ContentBlock, Effort, MentorRequest, MentorResponse, Message, Metadata, Role,
     StopDetails, StopReason, StreamEvent, SystemBlock, Thinking, ThinkingDisplay, Timing, ToolDef,
-    ToolResultContent, Usage,
+    ToolResultContent, Usage, WireRequest, request_body,
 };
 
 /// Receives streaming events; must be cheap (forward to a channel).

@@ -13,8 +13,7 @@ use super::assemble::{ApiErrorBody, Assembler};
 use super::error::MentorError;
 use super::sse::SseParser;
 use super::types::{
-    Effort, MentorRequest, MentorResponse, Message, Metadata, SystemBlock, Thinking, Timing,
-    ToolDef,
+    MentorRequest, MentorResponse, Message, SystemBlock, Thinking, Timing, ToolDef,
 };
 use super::{EventSink, Mentor};
 use crate::config::MentorConfig;
@@ -36,28 +35,6 @@ pub struct AnthropicMentor {
     http: reqwest::Client,
     capture_raw_sse: bool,
     max_backoff: Duration,
-}
-
-/// Wire shape of `POST /v1/messages`.
-#[derive(Serialize)]
-struct WireRequest<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    stream: bool,
-    #[serde(skip_serializing_if = "<[SystemBlock]>::is_empty")]
-    system: &'a [SystemBlock],
-    messages: &'a [Message],
-    #[serde(skip_serializing_if = "<[ToolDef]>::is_empty")]
-    tools: &'a [ToolDef],
-    thinking: &'a Thinking,
-    output_config: OutputConfig,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<&'a Metadata>,
-}
-
-#[derive(Serialize)]
-struct OutputConfig {
-    effort: Effort,
 }
 
 /// Wire shape of `POST /v1/messages/count_tokens`.
@@ -238,18 +215,8 @@ impl AnthropicMentor {
 #[async_trait]
 impl Mentor for AnthropicMentor {
     fn request_body(&self, req: &MentorRequest) -> Result<Vec<u8>, MentorError> {
-        serde_json::to_vec(&WireRequest {
-            model: &req.model,
-            max_tokens: req.max_tokens,
-            stream: true,
-            system: &req.system,
-            messages: &req.messages,
-            tools: &req.tools,
-            thinking: &req.thinking,
-            output_config: OutputConfig { effort: req.effort },
-            metadata: req.metadata.as_ref(),
-        })
-        .map_err(|e| MentorError::Protocol(format!("cannot serialise request: {e}")))
+        super::types::request_body(req)
+            .map_err(|e| MentorError::Protocol(format!("cannot serialise request: {e}")))
     }
 
     async fn complete(

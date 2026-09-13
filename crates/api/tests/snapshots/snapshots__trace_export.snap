@@ -1,0 +1,81 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(TraceExportParams\n{\n    output: \"C:/exports/week.tar.zst\".into(), session_ids: vec![],\n    workspace_id: Some(\"w1\".into()), since: Some(\"7d\".into()), until: None,\n    all: false, redact: true, redact_paths: true,\n}, TraceExportResult { path: \"C:/exports/week.tar.zst\".into(), manifest, })"
+---
+[
+  {
+    "output": "C:/exports/week.tar.zst",
+    "workspace_id": "w1",
+    "since": "7d",
+    "all": false,
+    "redact": true,
+    "redact_paths": true
+  },
+  {
+    "path": "C:/exports/week.tar.zst",
+    "manifest": {
+      "format_version": 1,
+      "created_at": "2026-09-13T10:00:00.000Z",
+      "harness_version": "0.1.0",
+      "schema_version": 3,
+      "selection": {
+        "workspace_id": "w1",
+        "since": "2026-09-06T10:00:00.000Z",
+        "all": false
+      },
+      "sessions": [
+        {
+          "id": "s1",
+          "title": "fix tests",
+          "workspace_id": "w1",
+          "created_at": "2026-09-12T10:00:00.000Z",
+          "updated_at": "2026-09-12T10:30:00.000Z",
+          "status": "open",
+          "agents": 2,
+          "events": 80,
+          "mentor_calls": 6,
+          "messages": 16
+        }
+      ],
+      "counts": {
+        "sessions": 2,
+        "workspaces": 1,
+        "agents": 3,
+        "steps": 9,
+        "events": 120,
+        "mentor_calls": 9,
+        "messages": 24,
+        "blobs": 40,
+        "blob_bytes": 1048576
+      },
+      "redaction": {
+        "applied": true,
+        "rules": [
+          {
+            "name": "anthropic_key",
+            "source": "builtin",
+            "matches": 4
+          },
+          {
+            "name": "ticket",
+            "source": "user",
+            "matches": 1
+          },
+          {
+            "name": "paths",
+            "source": "paths",
+            "matches": 12
+          }
+        ],
+        "replacements": 17,
+        "secrets": 2,
+        "paths": true,
+        "blob_map": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "touched_requests": 6,
+        "replayable": false
+      }
+    }
+  }
+]

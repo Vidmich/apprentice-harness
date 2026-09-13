@@ -281,8 +281,8 @@ impl AppState {
     }
 
     /// Registers every core handler: `config.*`, `auth.*`, `session.*`,
-    /// `agent.*`, `trace.*`, `stats.*`, `tools.*`, `workspace.*`,
-    /// `permission.*`.
+    /// `agent.*`, `trace.*` (the bundle methods included), `stats.*`,
+    /// `tools.*`, `workspace.*`, `permission.*`.
     /// `daemon.*` is the host's.
     pub fn register(self: &Arc<Self>, router: &mut Router) {
         crate::runtime::rpc::register(self, router);
@@ -291,6 +291,11 @@ impl AppState {
             .with_on_change(move || state.invalidate_mentor());
         Arc::new(config).register(router);
         Arc::new(TraceService::new(Arc::clone(&self.store))).register(router);
+        Arc::new(crate::bundle::BundleService::new(
+            Arc::clone(&self.store),
+            self.paths().config_dir.clone(),
+        ))
+        .register(router);
         Arc::new(StatsService::new(
             Arc::clone(&self.store),
             self.loader.clone(),
@@ -469,8 +474,11 @@ mod tests {
                 "tools.list",
                 "tools.remove",
                 "tools.rules",
+                "trace.export",
                 "trace.get",
+                "trace.import",
                 "trace.list",
+                "trace.replay_check",
                 "workspace.add",
                 "workspace.info",
                 "workspace.list",

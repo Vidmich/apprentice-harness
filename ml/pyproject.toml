@@ -5,7 +5,10 @@ description = "Training, evaluation and dataset tooling for apprentice-harness"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "LicenseRef-TBD" }
-dependencies = []
+dependencies = [
+    # `.tar.zst` trace bundles (`apprentice_ml.traces.bundle`).
+    "zstandard>=0.23",
+]
 
 [project.scripts]
 apprentice-ml = "apprentice_ml.cli:main"

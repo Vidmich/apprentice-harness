@@ -1,5 +1,7 @@
 //! Shared data types used by method params/results and events.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -214,6 +216,159 @@ pub struct SessionExport {
     pub session: SessionInfo,
     pub messages: Vec<SessionMessage>,
     pub mentor_calls: Vec<MentorCallInfo>,
+}
+
+/// Format version of a trace bundle (task M01-14): `manifest.json`
+/// carries it as `format_version`.
+pub const BUNDLE_FORMAT_VERSION: u32 = 1;
+
+/// `manifest.json` of a trace bundle: what is in it and what was done
+/// to it. Rows live in the `.jsonl` files next to it, blobs under
+/// `blobs/<aa>/<sha256>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BundleManifest {
+    /// [`BUNDLE_FORMAT_VERSION`].
+    pub format_version: u32,
+    pub created_at: String,
+    pub harness_version: String,
+    /// The trace schema the rows were read from.
+    pub schema_version: u32,
+    /// How the sessions were selected.
+    #[serde(default)]
+    pub selection: BundleSelection,
+    pub sessions: Vec<BundleSession>,
+    pub counts: BundleCounts,
+    /// Present when a redaction pass ran (`applied` says whether it
+    /// changed anything).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redaction: Option<RedactionReport>,
+}
+
+/// The selection an export was made with.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BundleSelection {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Store timestamps, as resolved from what was typed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(default)]
+    pub all: bool,
+}
+
+/// One session of a bundle, as the manifest lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleSession {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub status: String,
+    pub agents: u64,
+    pub events: u64,
+    pub mentor_calls: u64,
+    pub messages: u64,
+}
+
+/// Rows per file of a bundle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct BundleCounts {
+    pub sessions: u64,
+    pub workspaces: u64,
+    pub agents: u64,
+    pub steps: u64,
+    pub events: u64,
+    pub mentor_calls: u64,
+    pub messages: u64,
+    pub blobs: u64,
+    pub blob_bytes: u64,
+}
+
+/// What the redaction pass did (never the values it found).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct RedactionReport {
+    /// Something was replaced.
+    pub applied: bool,
+    /// Every rule that ran, with its matches.
+    pub rules: Vec<RedactionRule>,
+    /// Matches over all rules.
+    pub replacements: u64,
+    /// Distinct secrets (each got its own `<REDACTED:kind:n>`).
+    pub secrets: u64,
+    /// Path redaction ran (`<WS>`, `<HOME>`).
+    pub paths: bool,
+    /// Blobs whose content changed: old id → new id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub blob_map: BTreeMap<String, String>,
+    /// `mentor.request` bodies a replacement touched; their payload's
+    /// `request_hash` now names the redacted body.
+    pub touched_requests: u64,
+    /// No request body was touched: a replay of the bundle reproduces
+    /// the bytes the mentor saw.
+    pub replayable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedactionRule {
+    pub name: String,
+    /// `builtin`, `user` (`<config_dir>/redact.toml`), `workspace`
+    /// (`.harness/redact.toml`) or `paths`.
+    pub source: String,
+    pub matches: u64,
+}
+
+/// An imported session: the id in the bundle and the id it got.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportedSession {
+    pub from: String,
+    pub to: String,
+}
+
+/// One mentor call of a `trace.replay_check` report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplayCall {
+    pub call_id: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub step_id: String,
+    pub kind: String,
+    pub request_event_id: String,
+    pub status: ReplayStatus,
+    /// The checks that ran, in order: `blob`, `hash`, `parse`,
+    /// `canonical`, `rebuild`.
+    pub checks: Vec<String>,
+    /// Why it failed (or was skipped), one line each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayStatus {
+    Ok,
+    Failed,
+    /// A check could not run for this call (a title call under
+    /// `--rebuild`).
+    Skipped,
+}
+
+/// The result of `trace.replay_check`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ReplayReport {
+    pub calls: Vec<ReplayCall>,
+    pub checked: u64,
+    pub passed: u64,
+    pub failed: u64,
+    pub skipped: u64,
+    /// The `--rebuild` check ran.
+    pub rebuild: bool,
 }
 
 /// A registered workspace, as returned by `workspace.add` and listed by

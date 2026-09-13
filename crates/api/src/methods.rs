@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 use crate::types::{
-    AgentSummary, CallSummary, ConfigLayer, ConfigSource, EventSummary, PermissionAnswer,
-    RuleFileInfo, RuleInfo, RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo,
-    SessionMessage, SessionSearchHit, SessionSummary, StatsGroup, TokenStats, ToolInfo, TraceEvent,
-    WorkspaceSummary,
+    AgentSummary, BundleCounts, BundleManifest, CallSummary, ConfigLayer, ConfigSource,
+    EventSummary, ImportedSession, PermissionAnswer, ReplayReport, RuleFileInfo, RuleInfo,
+    RuleMatch, RuleSpec, RunOptions, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
+    SessionSummary, StatsGroup, TokenStats, ToolInfo, TraceEvent, WorkspaceSummary,
 };
 
 /// A typed RPC method.
@@ -444,6 +444,103 @@ pub struct TraceGetResult {
 
 method!(TraceGet, "trace.get", TraceGetParams, TraceGetResult);
 
+/// `trace.export`: writes the selected sessions with their agents, steps,
+/// events, calls, messages and blobs to a bundle at `output` (task
+/// M01-14). A path ending in `.tar.zst` is packed; any other is written
+/// as a directory (created; must not exist or be empty).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceExportParams {
+    /// Absolute path of the bundle to write.
+    pub output: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Sessions created at or after this (the `stats` range grammar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    /// Every session (required when nothing else selects).
+    #[serde(default)]
+    pub all: bool,
+    /// Run the redaction pass (secrets, user patterns). Default on.
+    #[serde(default = "default_true")]
+    pub redact: bool,
+    /// Also replace the workspace roots and the home directory with
+    /// `<WS>` / `<HOME>`.
+    #[serde(default)]
+    pub redact_paths: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TraceExportResult {
+    /// Where the bundle was written.
+    pub path: String,
+    pub manifest: BundleManifest,
+}
+
+method!(
+    TraceExport,
+    "trace.export",
+    TraceExportParams,
+    TraceExportResult
+);
+
+/// `trace.import`: reads a bundle (directory or `.tar.zst`) into the
+/// store after verifying every blob. Sessions get new ids unless
+/// `keep_ids` (then an existing id is a `conflict`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceImportParams {
+    /// Absolute path of the bundle.
+    pub path: String,
+    /// Attach every imported session to this registered workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into_workspace: Option<String>,
+    #[serde(default)]
+    pub keep_ids: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceImportResult {
+    pub sessions: Vec<ImportedSession>,
+    pub counts: BundleCounts,
+    /// The bundle was redacted before it was written.
+    pub redacted: bool,
+    /// Blobs written to the store (the rest were there already).
+    pub blobs_written: u64,
+}
+
+method!(
+    TraceImport,
+    "trace.import",
+    TraceImportParams,
+    TraceImportResult
+);
+
+/// `trace.replay_check`: proves the stored `mentor.request` bodies are
+/// what a replay needs. Without a selector every call is checked.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct TraceReplayCheckParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    /// Also rebuild each request from the stored conversation and
+    /// compare it to the body.
+    #[serde(default)]
+    pub rebuild: bool,
+}
+
+method!(
+    TraceReplayCheck,
+    "trace.replay_check",
+    TraceReplayCheckParams,
+    ReplayReport
+);
+
 // ---------------------------------------------------------------- stats.*
 
 /// `stats.tokens`: totals and breakdowns over the mentor calls in a
@@ -823,6 +920,9 @@ pub const ALL_METHODS: &[&str] = &[
     AgentSubscribe::NAME,
     TraceList::NAME,
     TraceGet::NAME,
+    TraceExport::NAME,
+    TraceImport::NAME,
+    TraceReplayCheck::NAME,
     StatsTokens::NAME,
     StatsCalls::NAME,
     StatsReprice::NAME,

@@ -573,7 +573,7 @@ fn put_message(tx: &Connection, m: &NewMessage) -> Result<()> {
     refresh_count(tx, &m.session)
 }
 
-fn put_message_at(tx: &Connection, m: &NewMessage, created_at: &str) -> Result<()> {
+pub(super) fn put_message_at(tx: &Connection, m: &NewMessage, created_at: &str) -> Result<()> {
     let content = serde_json::to_string(&m.content)?;
     tx.prepare_cached(
         "INSERT INTO session_messages(session_id, seq, role, content_json, agent_id, step_id, created_at)
@@ -601,7 +601,7 @@ fn put_message_at(tx: &Connection, m: &NewMessage, created_at: &str) -> Result<(
     Ok(())
 }
 
-fn refresh_count(tx: &Connection, session: &SessionId) -> Result<()> {
+pub(super) fn refresh_count(tx: &Connection, session: &SessionId) -> Result<()> {
     let n = tx
         .prepare_cached(
             "UPDATE sessions SET

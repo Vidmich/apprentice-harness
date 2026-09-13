@@ -12,6 +12,7 @@
 //! side over RPC.
 
 mod blobs;
+mod bundle;
 mod error;
 mod payload;
 mod record;
@@ -26,6 +27,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 pub use blobs::sha256_hex;
+pub use bundle::{ImportOutcome, ImportWrite};
 pub use error::TraceError;
 pub use payload::{BLOB_REF_KEY, blob_refs};
 pub use record::StepRef;

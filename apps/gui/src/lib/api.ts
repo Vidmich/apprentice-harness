@@ -487,6 +487,138 @@ export interface TraceGetResult {
   blob?: string;
 }
 
+// Trace bundles (task M01-14): the CLI's `trace export | import |
+// replay-check`; the GUI only knows the shapes.
+
+export interface BundleSelection {
+  session_ids?: string[];
+  workspace_id?: string;
+  since?: string;
+  until?: string;
+  all?: boolean;
+}
+
+export interface BundleSession {
+  id: string;
+  title?: string;
+  workspace_id?: string;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  agents: number;
+  events: number;
+  mentor_calls: number;
+  messages: number;
+}
+
+export interface BundleCounts {
+  sessions: number;
+  workspaces: number;
+  agents: number;
+  steps: number;
+  events: number;
+  mentor_calls: number;
+  messages: number;
+  blobs: number;
+  blob_bytes: number;
+}
+
+export interface RedactionRule {
+  name: string;
+  /** `builtin`, `user`, `workspace` or `paths`. */
+  source: string;
+  matches: number;
+}
+
+export interface RedactionReport {
+  applied: boolean;
+  rules: RedactionRule[];
+  replacements: number;
+  secrets: number;
+  paths: boolean;
+  blob_map?: Record<string, string>;
+  touched_requests: number;
+  replayable: boolean;
+}
+
+export interface BundleManifest {
+  format_version: number;
+  created_at: string;
+  harness_version: string;
+  schema_version: number;
+  selection?: BundleSelection;
+  sessions: BundleSession[];
+  counts: BundleCounts;
+  redaction?: RedactionReport;
+}
+
+export interface TraceExportParams {
+  /** Absolute; `.tar.zst` packs, anything else is a directory. */
+  output: string;
+  session_ids?: string[];
+  workspace_id?: string;
+  since?: string;
+  until?: string;
+  all?: boolean;
+  /** Default true. */
+  redact?: boolean;
+  redact_paths?: boolean;
+}
+
+export interface TraceExportResult {
+  path: string;
+  manifest: BundleManifest;
+}
+
+export interface TraceImportParams {
+  path: string;
+  into_workspace?: string;
+  keep_ids?: boolean;
+}
+
+export interface ImportedSession {
+  from: string;
+  to: string;
+}
+
+export interface TraceImportResult {
+  sessions: ImportedSession[];
+  counts: BundleCounts;
+  redacted: boolean;
+  blobs_written: number;
+}
+
+export interface TraceReplayCheckParams {
+  session_id?: string;
+  agent_id?: string;
+  call_id?: string;
+  rebuild?: boolean;
+}
+
+export type ReplayStatus = "ok" | "failed" | "skipped";
+
+export interface ReplayCall {
+  call_id: string;
+  session_id: string;
+  agent_id: string;
+  step_id: string;
+  kind: string;
+  request_event_id: string;
+  status: ReplayStatus;
+  /** `blob`, `hash`, `parse`, `canonical`, `rebuild`, in order. */
+  checks: string[];
+  problems?: string[];
+}
+
+export interface ReplayReport {
+  calls: ReplayCall[];
+  checked: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  rebuild: boolean;
+}
+
 export interface StatsTokensParams {
   since?: string;
   until?: string;
@@ -683,6 +815,9 @@ export interface Methods {
   "agent.subscribe": { params: AgentIdParams; result: AgentSubscribeResult };
   "trace.list": { params: TraceListParams; result: TraceListResult };
   "trace.get": { params: TraceGetParams; result: TraceGetResult };
+  "trace.export": { params: TraceExportParams; result: TraceExportResult };
+  "trace.import": { params: TraceImportParams; result: TraceImportResult };
+  "trace.replay_check": { params: TraceReplayCheckParams; result: ReplayReport };
   "stats.tokens": { params: StatsTokensParams; result: TokenStats };
   "stats.calls": { params: StatsCallsParams; result: StatsCallsResult };
   "stats.reprice": { params: StatsRepriceParams; result: StatsRepriceResult };
@@ -729,6 +864,9 @@ export const ALL_METHODS: readonly MethodName[] = [
   "agent.subscribe",
   "trace.list",
   "trace.get",
+  "trace.export",
+  "trace.import",
+  "trace.replay_check",
   "stats.tokens",
   "stats.calls",
   "stats.reprice",

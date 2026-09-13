@@ -12,13 +12,16 @@ use apprentice_api::methods::{
     SessionDeleteResult, SessionGetParams, SessionGetResult, SessionListParams, SessionListResult,
     SessionSearchParams, SessionSearchResult, StatsCallsParams, StatsCallsResult,
     StatsRepriceParams, StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult,
-    ToolsRuleParams, ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceGetParams,
-    TraceListParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
+    ToolsRuleParams, ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceExportParams,
+    TraceExportResult, TraceGetParams, TraceImportParams, TraceImportResult, TraceListParams,
+    TraceReplayCheckParams, WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult,
     WorkspaceListResult, WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
-    AgentSummary, ApprenticeStats, CallSummary, ConfigLayer, Effort, MentorCallInfo,
-    PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource, RuleDefault,
+    AgentSummary, ApprenticeStats, BUNDLE_FORMAT_VERSION, BundleCounts, BundleManifest,
+    BundleSelection, BundleSession, CallSummary, ConfigLayer, Effort, ImportedSession,
+    MentorCallInfo, PermissionAnswer, PermissionDecision, PermissionMode, PermissionSource,
+    RedactionReport, RedactionRule, ReplayCall, ReplayReport, ReplayStatus, RuleDefault,
     RuleEffect, RuleFileInfo, RuleInfo, RuleMatch, RuleSource, RuleSpec, RunOptions,
     SESSION_EXPORT_FORMAT, SessionExport, SessionInfo, SessionMessage, SessionSearchHit,
     SessionSummary, StatsGroup, StatsRange, TokenBucket, TokenStats, ToolInfo, Usage,
@@ -558,6 +561,171 @@ fn permission_shapes() {
                 permission_mode: Some(PermissionMode::Plan),
                 ..RunOptions::default()
             },
+        )
+    );
+}
+
+#[test]
+fn bundle_shapes() {
+    let counts = BundleCounts {
+        sessions: 2,
+        workspaces: 1,
+        agents: 3,
+        steps: 9,
+        events: 120,
+        mentor_calls: 9,
+        messages: 24,
+        blobs: 40,
+        blob_bytes: 1_048_576,
+    };
+    let manifest = BundleManifest {
+        format_version: BUNDLE_FORMAT_VERSION,
+        created_at: "2026-09-13T10:00:00.000Z".into(),
+        harness_version: "0.1.0".into(),
+        schema_version: 3,
+        selection: BundleSelection {
+            session_ids: vec![],
+            workspace_id: Some("w1".into()),
+            since: Some("2026-09-06T10:00:00.000Z".into()),
+            until: None,
+            all: false,
+        },
+        sessions: vec![BundleSession {
+            id: "s1".into(),
+            title: Some("fix tests".into()),
+            workspace_id: Some("w1".into()),
+            created_at: "2026-09-12T10:00:00.000Z".into(),
+            updated_at: "2026-09-12T10:30:00.000Z".into(),
+            status: "open".into(),
+            agents: 2,
+            events: 80,
+            mentor_calls: 6,
+            messages: 16,
+        }],
+        counts,
+        redaction: Some(RedactionReport {
+            applied: true,
+            rules: vec![
+                RedactionRule {
+                    name: "anthropic_key".into(),
+                    source: "builtin".into(),
+                    matches: 4,
+                },
+                RedactionRule {
+                    name: "ticket".into(),
+                    source: "user".into(),
+                    matches: 1,
+                },
+                RedactionRule {
+                    name: "paths".into(),
+                    source: "paths".into(),
+                    matches: 12,
+                },
+            ],
+            replacements: 17,
+            secrets: 2,
+            paths: true,
+            blob_map: [("a".repeat(64), "b".repeat(64))].into_iter().collect(),
+            touched_requests: 6,
+            replayable: false,
+        }),
+    };
+    assert_json_snapshot!(
+        "trace_export",
+        (
+            TraceExportParams {
+                output: "C:/exports/week.tar.zst".into(),
+                session_ids: vec![],
+                workspace_id: Some("w1".into()),
+                since: Some("7d".into()),
+                until: None,
+                all: false,
+                redact: true,
+                redact_paths: true,
+            },
+            TraceExportResult {
+                path: "C:/exports/week.tar.zst".into(),
+                manifest,
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "trace_import",
+        (
+            TraceImportParams {
+                path: "C:/exports/week.tar.zst".into(),
+                into_workspace: Some("w2".into()),
+                keep_ids: false,
+            },
+            TraceImportResult {
+                sessions: vec![ImportedSession {
+                    from: "s1".into(),
+                    to: "s9".into(),
+                }],
+                counts,
+                redacted: true,
+                blobs_written: 38,
+            }
+        )
+    );
+    assert_json_snapshot!(
+        "trace_replay_check",
+        (
+            TraceReplayCheckParams {
+                session_id: Some("s1".into()),
+                agent_id: None,
+                call_id: None,
+                rebuild: true,
+            },
+            ReplayReport {
+                calls: vec![
+                    ReplayCall {
+                        call_id: "m1".into(),
+                        session_id: "s1".into(),
+                        agent_id: "a1".into(),
+                        step_id: "st1".into(),
+                        kind: "step".into(),
+                        request_event_id: "e7".into(),
+                        status: ReplayStatus::Ok,
+                        checks: ["blob", "hash", "parse", "canonical", "rebuild"]
+                            .map(String::from)
+                            .to_vec(),
+                        problems: vec![],
+                    },
+                    ReplayCall {
+                        call_id: "m2".into(),
+                        session_id: "s1".into(),
+                        agent_id: "a1".into(),
+                        step_id: "st2".into(),
+                        kind: "step".into(),
+                        request_event_id: "e12".into(),
+                        status: ReplayStatus::Failed,
+                        checks: ["blob", "hash"].map(String::from).to_vec(),
+                        problems: vec!["body hashes to bbbb, not its id aaaa".into()],
+                    },
+                    ReplayCall {
+                        call_id: "m3".into(),
+                        session_id: "s1".into(),
+                        agent_id: "a1".into(),
+                        step_id: "st3".into(),
+                        kind: "title".into(),
+                        request_event_id: "e20".into(),
+                        status: ReplayStatus::Skipped,
+                        checks: ["blob", "hash", "parse", "canonical", "rebuild"]
+                            .map(String::from)
+                            .to_vec(),
+                        problems: vec![
+                            "rebuild skipped: a `title` call is not built from the conversation"
+                                .into(),
+                        ],
+                    },
+                ],
+                checked: 3,
+                passed: 1,
+                failed: 1,
+                skipped: 1,
+                rebuild: true,
+            }
         )
     );
 }

@@ -1,0 +1,32 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(TraceImportParams\n{\n    path: \"C:/exports/week.tar.zst\".into(), into_workspace: Some(\"w2\".into()),\n    keep_ids: false,\n}, TraceImportResult\n{\n    sessions: vec![ImportedSession { from: \"s1\".into(), to: \"s9\".into(), }],\n    counts, redacted: true, blobs_written: 38,\n})"
+---
+[
+  {
+    "path": "C:/exports/week.tar.zst",
+    "into_workspace": "w2",
+    "keep_ids": false
+  },
+  {
+    "sessions": [
+      {
+        "from": "s1",
+        "to": "s9"
+      }
+    ],
+    "counts": {
+      "sessions": 2,
+      "workspaces": 1,
+      "agents": 3,
+      "steps": 9,
+      "events": 120,
+      "mentor_calls": 9,
+      "messages": 24,
+      "blobs": 40,
+      "blob_bytes": 1048576
+    },
+    "redacted": true,
+    "blobs_written": 38
+  }
+]

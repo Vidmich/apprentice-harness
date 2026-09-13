@@ -5,6 +5,7 @@
 //! `apprentice-api` protocol; they never link this crate.
 
 pub mod app;
+pub mod bundle;
 pub mod config;
 pub mod mentor;
 pub mod permissions;

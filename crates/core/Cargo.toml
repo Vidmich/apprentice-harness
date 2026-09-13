@@ -31,6 +31,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 similar = { workspace = true }
 sysinfo = { workspace = true }
+tar = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }
@@ -39,6 +40,7 @@ toml = { workspace = true }
 toml_edit = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+zstd = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 # Job objects for the shell tool: a command's whole process tree dies

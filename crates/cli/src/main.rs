@@ -525,6 +525,53 @@ mod tests {
     }
 
     #[test]
+    fn trace_bundle_commands_parse() {
+        for args in [
+            vec![
+                "trace",
+                "export",
+                "--session",
+                "s1",
+                "--session",
+                "s2",
+                "--since",
+                "7d",
+                "--until",
+                "2026-09-13",
+                "--redact-paths",
+                "-o",
+                "week.tar.zst",
+            ],
+            vec!["trace", "export", "--workspace", "w1", "--no-redact"],
+            vec!["trace", "export", "--all"],
+            vec!["trace", "import", "week.tar.zst", "--into-workspace", "w1"],
+            vec!["trace", "import", "bundle/", "--keep-ids"],
+            vec!["trace", "replay-check"],
+            vec!["trace", "replay-check", "--session", "s1", "--rebuild"],
+            vec!["trace", "replay-check", "--agent", "a1"],
+            vec!["trace", "replay-check", "--call", "m1", "--rebuild"],
+        ] {
+            let mut full = vec!["harness"];
+            full.extend(args.iter());
+            let c = Cli::try_parse_from(&full).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            assert!(matches!(c.command, Command::Trace(_)));
+        }
+        assert!(Cli::try_parse_from(["harness", "trace", "import"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "harness",
+                "trace",
+                "replay-check",
+                "--session",
+                "s1",
+                "--call",
+                "m1"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn exit_codes_follow_the_contract() {
         let not_running: anyhow::Error = ConnectError::NotRunning {
             info_file: PathBuf::from("x"),

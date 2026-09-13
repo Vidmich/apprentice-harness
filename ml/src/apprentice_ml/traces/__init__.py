@@ -1,7 +1,10 @@
-"""Read-only access to the harness trace store (`traces.sqlite`, schema v1).
+"""Read-only access to the harness trace store (`traces.sqlite`) and to
+the bundles `harness trace export` writes (`apprentice_ml.traces.bundle`).
 
-Only the standard library is used so the format stays consumable from any
-Python environment. Blobs live next to the database under `blobs/<aa>/<id>`.
+Only the standard library is used for the database and for directory
+bundles, so the formats stay consumable from any Python environment
+(`zstandard` is needed to open a packed `.tar.zst`). Blobs live next to
+the database under `blobs/<aa>/<id>`.
 """
 
 from __future__ import annotations
@@ -12,7 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-SUPPORTED_SCHEMA = 1
+# The newest trace schema this reader understands; the queries below only
+# touch v1 columns, so every version up to here reads the same.
+SUPPORTED_SCHEMA = 3
 
 
 @dataclass
@@ -97,6 +102,16 @@ def iter_events(db: str | Path, session_id: str | None = None) -> Iterator[dict[
             item = dict(row)
             item["payload"] = json.loads(item.pop("payload_json"))
             yield item
+
+
+def stats_of(path: str | Path) -> TraceStats:
+    """Stats of a database or of a bundle (directory or `.tar.zst`)."""
+    from apprentice_ml.traces import bundle
+
+    if bundle.is_bundle(path):
+        with bundle.load_bundle(path) as b:
+            return bundle.stats(b)
+    return stats(path)
 
 
 def format_stats(s: TraceStats) -> str:

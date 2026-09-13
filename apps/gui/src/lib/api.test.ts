@@ -14,6 +14,7 @@ import {
   KNOWN_EVENT_TYPES,
   type PromptShowParams,
   type PromptShowResult,
+  type ReplayReport,
   SESSION_EXPORT_FORMAT,
   type SessionExport,
   type SessionGetParams,
@@ -27,6 +28,11 @@ import {
   type StatsTokensParams,
   type TokenStats,
   type ToolsListResult,
+  type TraceExportParams,
+  type TraceExportResult,
+  type TraceImportParams,
+  type TraceImportResult,
+  type TraceReplayCheckParams,
   type WorkspaceAddParams,
   type WorkspaceInfoResult,
   type WorkspaceSummary,
@@ -156,6 +162,29 @@ describe("api.ts against the Rust snapshots", () => {
     expect(exported.mentor_calls[0]?.kind).toBe("title");
   });
 
+  it("reads the bundle shapes", () => {
+    const [params, exported] = snapshot("trace_export") as [TraceExportParams, TraceExportResult];
+    expect(params.redact_paths).toBe(true);
+    expect(exported.manifest.format_version).toBe(1);
+    expect(exported.manifest.counts.blobs).toBe(40);
+    expect(exported.manifest.redaction?.rules.map((r) => r.source)).toEqual([
+      "builtin",
+      "user",
+      "paths",
+    ]);
+    expect(exported.manifest.redaction?.replayable).toBe(false);
+    const [imp, imported] = snapshot("trace_import") as [TraceImportParams, TraceImportResult];
+    expect(imp.into_workspace).toBe("w2");
+    expect(imported.sessions[0]).toEqual({ from: "s1", to: "s9" });
+    const [check, report] = snapshot("trace_replay_check") as [
+      TraceReplayCheckParams,
+      ReplayReport,
+    ];
+    expect(check.rebuild).toBe(true);
+    expect(report.calls.map((c) => c.status)).toEqual(["ok", "failed", "skipped"]);
+    expect(report.calls[1]?.problems?.[0]).toContain("hashes to");
+  });
+
   it("reads workspace info", () => {
     const info = snapshot("workspace_info") as WorkspaceInfoResult;
     expect(info.file_count).toBe(1234);
@@ -185,7 +214,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(36);
+    expect(ALL_METHODS.length).toBe(39);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 
