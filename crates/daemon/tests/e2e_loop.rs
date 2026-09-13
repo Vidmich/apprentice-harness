@@ -286,6 +286,49 @@ async fn a_three_step_run_lands_in_the_trace_and_the_session_continues() {
                 json!(["src/hello.rs"])
             );
 
+            // The prompt the session runs under (M01-09): its live
+            // blocks, the core first; the same core for a bare workspace.
+            let shown = json(
+                &h.harness()
+                    .args(["--json", "prompt", "show", "--session", &session])
+                    .assert()
+                    .success(),
+            );
+            assert_eq!(shown["version"], "mentor_system_v1");
+            assert_eq!(shown["session_id"], session);
+            let blocks = shown["blocks"].as_array().unwrap();
+            assert_eq!(blocks.len(), 2);
+            assert!(
+                blocks[0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("You are the mentor model of apprentice-harness")
+            );
+            let context = blocks[1]["text"].as_str().unwrap();
+            assert!(context.starts_with("#workspace\nroot: "), "{context}");
+            assert!(
+                context.contains("\ntop-level: src/, Cargo.toml\n"),
+                "{context}"
+            );
+            let fresh = h
+                .harness()
+                .arg("--json")
+                .args(["prompt", "show", "--workspace"])
+                .arg(h.workspace.path())
+                .assert()
+                .success();
+            let fresh = json(&fresh);
+            assert_eq!(fresh["blocks"][0], blocks[0]);
+            assert!(fresh.get("session_id").is_none());
+            let text = h
+                .harness()
+                .args(["prompt", "show", "--session", &session])
+                .assert()
+                .success();
+            let text = String::from_utf8_lossy(&text.get_output().stdout).into_owned();
+            assert!(text.starts_with("# mentor_system_v1 · session "), "{text}");
+            assert!(text.contains("--- system[1] ("), "{text}");
+
             // The same session, continued: the fourth call carries the
             // whole history.
             h.harness()

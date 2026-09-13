@@ -417,6 +417,58 @@ pub struct ToolsRuleResult {
 method!(ToolsAllow, "tools.allow", ToolsRuleParams, ToolsRuleResult);
 method!(ToolsDeny, "tools.deny", ToolsRuleParams, ToolsRuleResult);
 
+// ---------------------------------------------------------------- prompt.*
+
+/// `prompt.show`: the assembled system prompt (task M01-09) of a
+/// session — the blocks it runs under, or would — or of a workspace.
+/// Both absent: the prompt of a session without a workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct PromptShowParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// A workspace root; ignored when `session_id` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Ask the mentor's `count_tokens` for the size of the blocks
+    /// (needs an API key; a failure is reported in `token_error`).
+    #[serde(default)]
+    pub count: bool,
+}
+
+/// One system block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptBlock {
+    pub text: String,
+    /// Carries a cache breakpoint in requests.
+    pub cache: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptShowResult {
+    /// `mentor_system_v1`, ...
+    pub version: String,
+    pub blocks: Vec<PromptBlock>,
+    /// The session whose live conversation the blocks came from, when
+    /// one was running or had run in this daemon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    /// Input tokens of the blocks (plus one one-word user message the
+    /// count needs), when `count` was asked and succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_error: Option<String>,
+}
+
+method!(
+    PromptShow,
+    "prompt.show",
+    PromptShowParams,
+    PromptShowResult
+);
+
 // ------------------------------------------------------------ permission.*
 
 /// `permission.respond`: answers a `permission.request` event. The
@@ -555,6 +607,7 @@ pub const ALL_METHODS: &[&str] = &[
     ToolsRules::NAME,
     ToolsAllow::NAME,
     ToolsDeny::NAME,
+    PromptShow::NAME,
     PermissionRespond::NAME,
     WorkspaceAdd::NAME,
     WorkspaceList::NAME,

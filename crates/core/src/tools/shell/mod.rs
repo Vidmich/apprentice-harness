@@ -40,6 +40,7 @@ use self::process::{Ended, Outcome, spawn};
 use self::program::Program;
 use super::file::{parse, target};
 use super::{ProgressStream, Risk, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
+use crate::config::ShellConfig;
 
 /// `timeout_s` when the mentor gives none.
 pub const SHELL_DEFAULT_TIMEOUT_S: u64 = 120;
@@ -52,6 +53,12 @@ pub const JOBS_MAX_WAIT_S: u64 = 600;
 const WRAPPER_TIMEOUT: Duration = Duration::from_secs(SHELL_MAX_TIMEOUT_S + 60);
 /// How long `kill` waits for the job's final status.
 const KILL_WAIT: Duration = Duration::from_secs(3);
+
+/// The name of the shell `config` selects (`pwsh`, `bash`, ...), for
+/// the system prompt's workspace block.
+pub fn shell_name(config: &ShellConfig) -> String {
+    Program::resolve(config).name
+}
 
 /// The two shell tools, sharing one job registry.
 pub fn shell_tools() -> Vec<Arc<dyn Tool>> {

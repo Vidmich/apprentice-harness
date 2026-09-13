@@ -31,13 +31,15 @@ impl StepRef {
 impl TraceStore {
     /// Records the request exactly as it will be sent (`body` is the
     /// replay unit and is always stored as a blob) and opens the
-    /// `mentor_calls` row.
+    /// `mentor_calls` row. `prompt_version` names the system prompt the
+    /// request carries (task M01-09).
     pub fn record_mentor_request(
         &self,
         at: &StepRef,
         call_id: &CallId,
         req: &MentorRequest,
         body: &[u8],
+        prompt_version: Option<&str>,
     ) -> Result<EventId, TraceError> {
         let effort = serde_json::to_value(req.effort)?
             .as_str()
@@ -55,6 +57,7 @@ impl TraceStore {
             "message_count": req.messages.len(),
             "tool_names": req.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
             "system_hash": system_hash,
+            "prompt_version": prompt_version,
             "request_hash": sha256_hex(body),
             "bytes": body.len(),
         });

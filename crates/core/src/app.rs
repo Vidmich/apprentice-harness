@@ -248,7 +248,10 @@ impl AppState {
             .as_deref()
             .map(|root| self.workspaces.add(std::path::Path::new(root), None))
             .transpose()?;
-        let config = self.loader.load(workspace.as_ref().map(|w| w.root()))?.tree;
+        let mut config = self.loader.load(workspace.as_ref().map(|w| w.root()))?.tree;
+        // The prompt the session will run under (task M01-09); M01-10
+        // reads it back on resume.
+        config["prompt_version"] = serde_json::Value::from(crate::runtime::PROMPT_VERSION);
         let session = NewSession {
             title: p.title.clone(),
             workspace_path: workspace.as_ref().map(|w| w.root_string()),
@@ -365,6 +368,8 @@ mod tests {
         let record = state.store().get_session(&r.session_id.into()).unwrap();
         assert_eq!(record.title.as_deref(), Some("t"));
         assert_eq!(record.workspace_id, None);
+        assert_eq!(record.config["prompt_version"], "mentor_system_v1");
+        assert!(record.config["mentor"]["model"].is_string());
         assert_eq!(state.sessions_open().unwrap(), 1);
 
         // A workspace path registers the workspace and links the session.
@@ -438,6 +443,7 @@ mod tests {
                 "config.path",
                 "config.set",
                 "permission.respond",
+                "prompt.show",
                 "session.create",
                 "session.list",
                 "stats.reprice",

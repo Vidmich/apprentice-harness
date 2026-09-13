@@ -5,8 +5,9 @@
 //! the session appends a user turn and runs the loop over it.
 //!
 //! Cache breakpoints are placed when a request is built, never stored:
-//! the last system block, the last tool, and the last block of the last
-//! user message (SPEC §6). Messages are kept exactly as exchanged —
+//! every system block (the core shared across sessions, then the
+//! workspace block; see [`super::prompt`]), the last tool, and the last
+//! block of the last user message (SPEC §6). Messages are kept exactly as exchanged —
 //! assistant content with its thinking blocks and signatures, tool
 //! results as the mentor received them — so a request is the same bytes
 //! the API already saw plus the new tail.
@@ -16,6 +17,7 @@ use std::fmt::Write as _;
 use apprentice_api::types::{RunOptions, Usage};
 use serde_json::Value;
 
+use super::prompt::SystemPrompt;
 use crate::config::Config;
 use crate::mentor::{
     ContentBlock, Effort, MentorRequest, Message, Role, SystemBlock, Thinking, ToolDef,
@@ -32,6 +34,8 @@ pub struct Conversation {
     session_id: SessionId,
     messages: Vec<Message>,
     system: Vec<SystemBlock>,
+    /// [`super::prompt::PROMPT_VERSION`] of the system blocks, once set.
+    prompt_version: Option<String>,
     tools: Vec<ToolDef>,
     /// `None` until the first [`Self::set_tools`].
     tools_hash: Option<String>,
@@ -56,6 +60,7 @@ impl Conversation {
             session_id,
             messages: Vec::new(),
             system: Vec::new(),
+            prompt_version: None,
             tools_hash: None,
             tools: Vec::new(),
             model: String::new(),
@@ -96,9 +101,15 @@ impl Conversation {
     }
 
     /// The system prompt, frozen for the session: set once, at the
-    /// first run (M01-09 builds it).
-    pub fn set_system(&mut self, system: Vec<SystemBlock>) {
-        self.system = system;
+    /// first run ([`super::prompt::build_system`] assembles it).
+    pub fn set_system(&mut self, prompt: SystemPrompt) {
+        self.system = prompt.blocks;
+        self.prompt_version = Some(prompt.version);
+    }
+
+    /// The version of the system prompt in use, once set.
+    pub fn prompt_version(&self) -> Option<&str> {
+        self.prompt_version.as_deref()
     }
 
     /// Replaces the tool set. Returns the previous hash when an
@@ -327,9 +338,6 @@ impl Conversation {
         }
         let mut system = self.system.clone();
         for s in &mut system {
-            s.cache = crate::mentor::CacheFlag(false);
-        }
-        if let Some(s) = system.last_mut() {
             s.cache = crate::mentor::CacheFlag(true);
         }
         MentorRequest {
@@ -423,7 +431,11 @@ mod tests {
 
     fn conv() -> Conversation {
         let mut c = Conversation::new(SessionId::from("s1"));
-        c.set_system(vec![SystemBlock::new("You are"), SystemBlock::new("Rules")]);
+        c.set_system(SystemPrompt {
+            version: "test_v1".into(),
+            blocks: vec![SystemBlock::new("You are"), SystemBlock::new("Rules")],
+        });
+        assert_eq!(c.prompt_version(), Some("test_v1"));
         assert_eq!(
             c.set_tools(vec![tool("write_file"), tool("read_file")]),
             None
@@ -443,7 +455,7 @@ mod tests {
         assert_eq!(names, ["read_file", "write_file"]);
         assert_eq!(req.tools[0].cache, CacheFlag(false));
         assert_eq!(req.tools[1].cache, CacheFlag(true));
-        assert_eq!(req.system[0].cache, CacheFlag(false));
+        assert_eq!(req.system[0].cache, CacheFlag(true));
         assert_eq!(req.system[1].cache, CacheFlag(true));
         assert_eq!(
             req.messages,

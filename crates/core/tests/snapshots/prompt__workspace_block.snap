@@ -1,0 +1,15 @@
+---
+source: crates/core/tests/prompt.rs
+expression: "prompt.blocks[1].text"
+---
+#workspace
+root: C:/src/fixture
+os: windows 11 (26100) · shell: pwsh · harness 0.1.0
+git: not a git repository
+languages: rust 33%, markdown 22%, typescript 22%, text 11%, toml 11%
+top-level: .harness/, apps/, src/, Cargo.toml, README.md, notes.txt
+#instructions (from .harness/HARNESS.md)
+# Fixture rules
+
+- Run `cargo test` after every change.
+- Never touch `apps/web`.

@@ -26,7 +26,7 @@ use tracing::{debug, info, warn};
 use super::AgentHandle;
 use super::conversation::{CONTINUE_MESSAGE, Conversation};
 use super::hooks::{CallContext, StepHooks, ToolExecContext, ToolResultContext};
-use super::prompt::system_blocks;
+use super::prompt::build_system;
 use crate::app::AppState;
 use crate::config::Config;
 use crate::mentor::{Mentor, MentorError, MentorResponse, StopReason, StreamEvent};
@@ -104,7 +104,7 @@ pub(super) async fn execute(
         session_id: handle.session_id.to_string(),
     });
 
-    let finish = match Run::setup(state, handle, opts, conversation, hooks) {
+    let finish = match Run::setup(state, handle, opts, conversation, hooks).await {
         Ok(mut run) => {
             conversation.push_user_text(prompt);
             let start = run.snapshot(SnapshotPhase::Start).await;
@@ -166,7 +166,7 @@ struct Run<'a> {
 }
 
 impl<'a> Run<'a> {
-    fn setup(
+    async fn setup(
         state: &'a Arc<AppState>,
         handle: &'a AgentHandle,
         opts: &RunOptions,
@@ -202,7 +202,7 @@ impl<'a> Run<'a> {
 
         conversation.configure(&config, opts);
         if conversation.system().is_empty() {
-            conversation.set_system(system_blocks());
+            conversation.set_system(build_system(workspace.as_ref(), &config).await);
         }
         if let Some(old) = conversation.set_tools(state.tools().defs(&config.tools.disabled)) {
             warn!(
@@ -507,9 +507,12 @@ impl<'a> Run<'a> {
         };
         {
             let (at, call_id, req) = (at.clone(), call_id.clone(), req.clone());
+            let version = conv.prompt_version().map(str::to_owned);
             self.state
                 .writer()
-                .run(move |store| store.record_mentor_request(&at, &call_id, &req, &body))
+                .run(move |store| {
+                    store.record_mentor_request(&at, &call_id, &req, &body, version.as_deref())
+                })
                 .await?;
         }
 

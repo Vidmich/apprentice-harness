@@ -1,26 +1,37 @@
-//! `agent.run`, `agent.cancel` and `agent.subscribe`. Events go to the
-//! connection that asked, on a subscription named after the agent; a
-//! connection that drops does not cancel the agent (the CLI cancels
-//! explicitly on CTRL-C, the GUI may reattach with `agent.subscribe`).
+//! `agent.run`, `agent.cancel` and `agent.subscribe`, and `prompt.show`.
+//! Events go to the connection that asked, on a subscription named
+//! after the agent; a connection that drops does not cancel the agent
+//! (the CLI cancels explicitly on CTRL-C, the GUI may reattach with
+//! `agent.subscribe`).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use apprentice_api::events::{AgentStatus, Event};
 use apprentice_api::jsonrpc::RpcError;
 use apprentice_api::methods::{
     AgentCancel, AgentIdParams, AgentRun, AgentRunParams, AgentRunResult, AgentSubscribe,
-    AgentSubscribeResult, Empty,
+    AgentSubscribeResult, Empty, PromptBlock, PromptShow, PromptShowParams, PromptShowResult,
 };
 use apprentice_api::server::{Connection, Router};
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
+use super::prompt::{PROMPT_VERSION, SystemPrompt, build_system};
 use super::run_agent;
 use crate::app::AppState;
-use crate::trace::{AgentId, RunStatus};
+use crate::mentor::{MentorRequest, Message};
+use crate::trace::{AgentId, RunStatus, SessionId};
+use crate::workspace::Workspace;
 
-/// Registers the three `agent.*` methods.
+/// Registers the three `agent.*` methods and `prompt.show`.
 pub fn register(state: &Arc<AppState>, router: &mut Router) {
+    let s = Arc::clone(state);
+    router.add::<PromptShow, _, _>(move |_conn: Arc<Connection>, p: PromptShowParams| {
+        let state = Arc::clone(&s);
+        async move { prompt_show(&state, &p).await }
+    });
+
     let s = Arc::clone(state);
     router.add::<AgentRun, _, _>(move |conn: Arc<Connection>, p: AgentRunParams| {
         let state = Arc::clone(&s);
@@ -96,6 +107,99 @@ pub fn register(state: &Arc<AppState>, router: &mut Router) {
             ))
         }
     });
+}
+
+/// `prompt.show` (task M01-09): the system blocks a session runs under
+/// — its live conversation's when this daemon has one with a prompt set
+/// and no agent holds it, else assembled now for its workspace — or
+/// assembled for `workspace`; token count on request.
+///
+/// # Errors
+/// Unknown session, a workspace that is not a directory, invalid
+/// config.
+pub async fn prompt_show(
+    state: &Arc<AppState>,
+    p: &PromptShowParams,
+) -> Result<PromptShowResult, RpcError> {
+    let mut from_session = None;
+    let (workspace, live) = if let Some(id) = &p.session_id {
+        let id = SessionId::from(id.clone());
+        let session = state.store().get_session(&id)?;
+        let workspace = match (&session.workspace_id, &session.workspace_path) {
+            (Some(ws), _) => Some(state.workspaces().get(ws)?),
+            (None, Some(path)) => Some(state.workspaces().open_root(Path::new(path))?),
+            (None, None) => None,
+        };
+        let live = state
+            .agents()
+            .conversation(&id)
+            .try_lock()
+            .ok()
+            .filter(|c| !c.system().is_empty())
+            .map(|c| SystemPrompt {
+                version: c.prompt_version().unwrap_or(PROMPT_VERSION).to_owned(),
+                blocks: c.system().to_vec(),
+            });
+        if live.is_some() {
+            from_session = Some(id.into_string());
+        }
+        (workspace, live)
+    } else {
+        let workspace = p
+            .workspace
+            .as_deref()
+            .map(|root| state.workspaces().open_root(Path::new(root)))
+            .transpose()?;
+        (workspace, None)
+    };
+    let config = state
+        .loader()
+        .load(workspace.as_ref().map(|w| w.root()))?
+        .config;
+    let prompt = match live {
+        Some(prompt) => prompt,
+        None => build_system(workspace.as_ref(), &config).await,
+    };
+    let (tokens, token_error) = if p.count {
+        match count(state, &prompt, &config.mentor.model).await {
+            Ok(n) => (Some(n), None),
+            Err(e) => (None, Some(e)),
+        }
+    } else {
+        (None, None)
+    };
+    Ok(PromptShowResult {
+        version: prompt.version,
+        blocks: prompt
+            .blocks
+            .into_iter()
+            .map(|b| PromptBlock {
+                text: b.text,
+                cache: true,
+            })
+            .collect(),
+        session_id: from_session,
+        workspace: workspace.as_deref().map(Workspace::root_string),
+        tokens,
+        token_error,
+    })
+}
+
+/// `count_tokens` over the blocks and the shortest user message the
+/// endpoint accepts.
+async fn count(state: &Arc<AppState>, prompt: &SystemPrompt, model: &str) -> Result<u64, String> {
+    let mentor = state.mentor().map_err(|e| e.to_string())?;
+    let req = MentorRequest {
+        model: model.to_owned(),
+        max_tokens: 1,
+        system: prompt.blocks.clone(),
+        messages: vec![Message::user(".")],
+        tools: Vec::new(),
+        thinking: crate::mentor::Thinking::default(),
+        effort: crate::mentor::Effort::High,
+        metadata: None,
+    };
+    mentor.count_tokens(&req).await.map_err(|e| e.to_string())
 }
 
 /// Answers `agent.subscribe` for an agent that has ended: the terminal

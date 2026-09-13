@@ -425,7 +425,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     let req = request();
     let body = serde_json::to_vec(&req).unwrap();
     let req_ev = store
-        .record_mentor_request(&at, &call, &req, &body)
+        .record_mentor_request(&at, &call, &req, &body, Some("mentor_system_v1"))
         .unwrap();
     let running = store.get_mentor_call(&call).unwrap();
     assert_eq!(running.status, RunStatus::Running);
@@ -437,6 +437,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     assert_eq!(ev.payload["message_count"], 1);
     assert_eq!(ev.payload["max_tokens"], 100);
     assert!(ev.payload["system_hash"].is_string());
+    assert_eq!(ev.payload["prompt_version"], "mentor_system_v1");
     assert_eq!(
         ev.payload["request_hash"].as_str().unwrap(),
         ev.blob_id.as_deref().unwrap()
@@ -480,7 +481,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 2: a retried attempt, then a final error; unpriced.
     let call2 = CallId::generate();
     store
-        .record_mentor_request(&at, &call2, &req, &body)
+        .record_mentor_request(&at, &call2, &req, &body, None)
         .unwrap();
     store
         .record_mentor_error(&at, &call2, &MentorError::Overloaded, 0, false)
@@ -511,7 +512,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 3: cancelled.
     let call3 = CallId::generate();
     store
-        .record_mentor_request(&at, &call3, &req, &body)
+        .record_mentor_request(&at, &call3, &req, &body, None)
         .unwrap();
     store
         .record_mentor_error(&at, &call3, &MentorError::Cancelled, 0, true)
@@ -524,7 +525,7 @@ fn mentor_call_recording_is_replayable_and_aggregated() {
     // Call 4: ok but unpriced.
     let call4 = CallId::generate();
     store
-        .record_mentor_request(&at, &call4, &req, &body)
+        .record_mentor_request(&at, &call4, &req, &body, None)
         .unwrap();
     store
         .record_mentor_response(&at, &call4, &response(None), None)

@@ -8,10 +8,11 @@ use apprentice_api::events::{
 use apprentice_api::jsonrpc::{Id, Message, Response, RpcError};
 use apprentice_api::methods::{
     AgentRunParams, AgentRunResult, ConfigGetParams, ConfigSetParams, HelloParams, HelloResult,
-    PermissionRespondParams, StatsRepriceParams, StatsRepriceResult, StatsTokensParams,
-    ToolsListParams, ToolsListResult, ToolsRuleParams, ToolsRuleResult, ToolsRulesParams,
-    ToolsRulesResult, TraceGetParams, TraceListParams, WorkspaceAddParams, WorkspaceIdParams,
-    WorkspaceInfoResult, WorkspaceListResult, WorkspaceRemoveResult,
+    PermissionRespondParams, PromptBlock, PromptShowParams, PromptShowResult, StatsRepriceParams,
+    StatsRepriceResult, StatsTokensParams, ToolsListParams, ToolsListResult, ToolsRuleParams,
+    ToolsRuleResult, ToolsRulesParams, ToolsRulesResult, TraceGetParams, TraceListParams,
+    WorkspaceAddParams, WorkspaceIdParams, WorkspaceInfoResult, WorkspaceListResult,
+    WorkspaceRemoveResult,
 };
 use apprentice_api::types::{
     ApprenticeStats, ConfigLayer, Effort, PermissionAnswer, PermissionDecision, PermissionMode,
@@ -186,6 +187,40 @@ fn tools_shape() {
                         enabled: false,
                     }
                 ]
+            }
+        )
+    );
+}
+
+#[test]
+fn prompt_shape() {
+    assert_json_snapshot!(
+        "prompt_show",
+        (
+            PromptShowParams {
+                session_id: None,
+                workspace: Some("/work/repo".into()),
+                count: true,
+            },
+            PromptShowResult {
+                version: "mentor_system_v1".into(),
+                blocks: vec![
+                    PromptBlock {
+                        text: "You are the mentor model of apprentice-harness ...".into(),
+                        cache: true,
+                    },
+                    PromptBlock {
+                        text: "#workspace
+root: /work/repo
+"
+                        .into(),
+                        cache: true,
+                    },
+                ],
+                session_id: None,
+                workspace: Some("/work/repo".into()),
+                tokens: Some(1042),
+                token_error: None,
             }
         )
     );

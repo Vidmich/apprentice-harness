@@ -1,0 +1,25 @@
+---
+source: crates/api/tests/snapshots.rs
+expression: "(PromptShowParams\n{ session_id: None, workspace: Some(\"/work/repo\".into()), count: true, },\nPromptShowResult\n{\n    version: \"mentor_system_v1\".into(), blocks:\n    vec![PromptBlock\n    {\n        text: \"You are the mentor model of apprentice-harness ...\".into(),\n        cache: true,\n    }, PromptBlock\n    { text: \"#workspace\nroot: /work/repo\n\".into(), cache: true, },],\n    session_id: None, workspace: Some(\"/work/repo\".into()), tokens:\n    Some(1042), token_error: None,\n})"
+---
+[
+  {
+    "workspace": "/work/repo",
+    "count": true
+  },
+  {
+    "version": "mentor_system_v1",
+    "blocks": [
+      {
+        "text": "You are the mentor model of apprentice-harness ...",
+        "cache": true
+      },
+      {
+        "text": "#workspace\nroot: /work/repo\n",
+        "cache": true
+      }
+    ],
+    "workspace": "/work/repo",
+    "tokens": 1042
+  }
+]

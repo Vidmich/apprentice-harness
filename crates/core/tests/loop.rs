@@ -20,7 +20,9 @@ use apprentice_api::types::{
 use apprentice_core::app::AppState;
 use apprentice_core::config::{ConfigLoader, Paths};
 use apprentice_core::mentor::MentorRequest;
-use apprentice_core::runtime::{AgentHandle, CONTINUE_MESSAGE, Conversation, run_agent};
+use apprentice_core::runtime::{
+    AgentHandle, CONTINUE_MESSAGE, Conversation, MENTOR_SYSTEM_V1, PROMPT_VERSION, run_agent,
+};
 use apprentice_core::secrets::{Secret, SecretStore as _, api_key_name};
 use apprentice_core::tools::{Risk, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
 use apprentice_core::trace::{BlobId, RunStatus, SessionId, TraceStore, kinds};
@@ -362,6 +364,31 @@ async fn a_three_step_trajectory_streams_events_and_records_every_step() {
     assert_eq!(names, sorted);
     assert!(names.contains(&"slow") && names.contains(&"write_file"));
     assert!(bodies.iter().all(|b| b["system"] == bodies[0]["system"]));
+    // The system prompt (M01-09): the frozen core, then the workspace
+    // block, a breakpoint on each.
+    let system = bodies[0]["system"].as_array().unwrap();
+    assert_eq!(system.len(), 2);
+    assert_eq!(system[0]["text"], MENTOR_SYSTEM_V1);
+    let context = system[1]["text"].as_str().unwrap();
+    assert!(context.starts_with("#workspace\nroot: "), "{context}");
+    assert!(
+        context.contains("\ngit: not a git repository\n"),
+        "{context}"
+    );
+    assert!(
+        context.contains("\nlanguages: rust 50%, toml 50%\n"),
+        "{context}"
+    );
+    assert!(
+        context.contains("\ntop-level: src/, Cargo.toml\n"),
+        "{context}"
+    );
+    assert!(!context.contains("#instructions"), "{context}");
+    assert!(
+        system
+            .iter()
+            .all(|s| s["cache_control"]["type"] == "ephemeral")
+    );
     let messages = bodies[2]["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 5);
     let roles: Vec<&str> = messages
@@ -434,6 +461,17 @@ async fn a_three_step_trajectory_streams_events_and_records_every_step() {
     let requests = of_kind(&trace, kinds::MENTOR_REQUEST);
     let hashes: Vec<&Value> = requests.iter().map(|r| &r.payload["tool_names"]).collect();
     assert!(hashes.iter().all(|h| *h == hashes[0]));
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.payload["prompt_version"] == PROMPT_VERSION),
+        "{:?}",
+        requests[0].payload
+    );
+    assert_eq!(
+        store.get_session(&session).unwrap().config["prompt_version"],
+        PROMPT_VERSION
+    );
     assert_eq!(requests[0].payload["message_count"], 1);
     assert_eq!(requests[1].payload["message_count"], 3);
     assert_eq!(requests[2].payload["message_count"], 5);

@@ -356,6 +356,33 @@ export interface ToolsRuleResult {
   rule: RuleSpec;
 }
 
+// ---------------------------------------------------------------- prompt.*
+
+export interface PromptShowParams {
+  session_id?: string;
+  /** Ignored when `session_id` is given. */
+  workspace?: string;
+  /** Ask the mentor's `count_tokens` (needs an API key). */
+  count?: boolean;
+}
+
+export interface PromptBlock {
+  text: string;
+  /** Carries a cache breakpoint in requests. */
+  cache: boolean;
+}
+
+export interface PromptShowResult {
+  /** `mentor_system_v1`, ... */
+  version: string;
+  blocks: PromptBlock[];
+  /** Set when the blocks came from the session's live conversation. */
+  session_id?: string;
+  workspace?: string;
+  tokens?: number;
+  token_error?: string;
+}
+
 // ---------------------------------------------------------------- permission.*
 
 export interface PermissionRespondParams {
@@ -427,6 +454,7 @@ export interface Methods {
   "tools.rules": { params: ToolsRulesParams; result: ToolsRulesResult };
   "tools.allow": { params: ToolsRuleParams; result: ToolsRuleResult };
   "tools.deny": { params: ToolsRuleParams; result: ToolsRuleResult };
+  "prompt.show": { params: PromptShowParams; result: PromptShowResult };
   "permission.respond": { params: PermissionRespondParams; result: Empty };
   "workspace.add": { params: WorkspaceAddParams; result: WorkspaceSummary };
   "workspace.list": { params: Empty; result: WorkspaceListResult };
@@ -464,6 +492,7 @@ export const ALL_METHODS: readonly MethodName[] = [
   "tools.rules",
   "tools.allow",
   "tools.deny",
+  "prompt.show",
   "permission.respond",
   "workspace.add",
   "workspace.list",

@@ -12,6 +12,8 @@ import {
   type EventNotification,
   type HelloResult,
   KNOWN_EVENT_TYPES,
+  type PromptShowParams,
+  type PromptShowResult,
   type TokenStats,
   type ToolsListResult,
   type WorkspaceAddParams,
@@ -102,6 +104,15 @@ describe("api.ts against the Rust snapshots", () => {
     ]);
   });
 
+  it("reads the assembled prompt", () => {
+    const [params, result] = snapshot("prompt_show") as [PromptShowParams, PromptShowResult];
+    expect(params.count).toBe(true);
+    expect(result.version).toBe("mentor_system_v1");
+    expect(result.blocks.map((b) => b.cache)).toEqual([true, true]);
+    expect(result.blocks[1]?.text.startsWith("#workspace\n")).toBe(true);
+    expect(result.tokens).toBe(1042);
+  });
+
   it("reads workspace info", () => {
     const info = snapshot("workspace_info") as WorkspaceInfoResult;
     expect(info.file_count).toBe(1234);
@@ -114,7 +125,7 @@ describe("api.ts against the Rust snapshots", () => {
   });
 
   it("lists every method the daemon knows, namespaced", () => {
-    expect(ALL_METHODS.length).toBe(27);
+    expect(ALL_METHODS.length).toBe(28);
     for (const m of ALL_METHODS) expect(m).toMatch(/^[a-z]+\.[a-z_]+$/);
   });
 

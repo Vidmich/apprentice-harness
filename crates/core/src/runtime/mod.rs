@@ -33,6 +33,10 @@ use tracing::{Instrument, info, info_span};
 pub use agent::DEFAULT_WAIT;
 pub use conversation::{CONTINUE_MESSAGE, Conversation, hash_tools};
 pub use hooks::{CallContext, NoopHooks, StepHooks, ToolExecContext, ToolResultContext};
+pub use prompt::{
+    Host, MENTOR_SYSTEM_V1, PROMPT_VERSION, SystemPrompt, WorkspaceContext, assemble, build_system,
+};
+pub use rpc::prompt_show;
 
 use crate::app::AppState;
 use crate::permissions::EventSink;

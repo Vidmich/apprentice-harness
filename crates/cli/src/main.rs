@@ -11,6 +11,7 @@ mod config;
 mod daemon;
 mod doctor;
 mod out;
+mod prompt;
 mod run;
 mod session;
 mod stats;
@@ -130,6 +131,9 @@ enum Command {
     /// The tools the mentor can call.
     #[command(subcommand)]
     Tools(tools::ToolsCommand),
+    /// The system prompt the mentor gets.
+    #[command(subcommand)]
+    Prompt(prompt::PromptCommand),
     /// Registered workspace roots.
     #[command(subcommand, visible_alias = "ws")]
     Workspace(workspace::WorkspaceCommand),
@@ -245,6 +249,7 @@ fn run(cli: Cli, out: Out) -> anyhow::Result<()> {
         Command::Trace(cmd) => trace::run(&ctx, &cmd),
         Command::Stats(cmd) => stats::run(&ctx, &cmd),
         Command::Tools(cmd) => tools::run(&ctx, &cmd),
+        Command::Prompt(cmd) => prompt::run(&ctx, &cmd),
         Command::Workspace(cmd) => workspace::run(&ctx, &cmd),
         Command::Doctor => doctor::run(&ctx.paths, log.ok().as_ref(), ctx.out.json),
         Command::Completions { .. } => unreachable!("handled above"),
@@ -388,6 +393,29 @@ mod tests {
         let c = Cli::try_parse_from(["harness", "run", "--permission-mode", "plan", "x"]).unwrap();
         assert!(matches!(c.command, Command::Run(_)));
         assert!(Cli::try_parse_from(["harness", "run", "--permission-mode", "yolo", "x"]).is_err());
+    }
+
+    #[test]
+    fn prompt_commands_parse() {
+        let c = Cli::try_parse_from(["harness", "prompt", "show", "--session", "s1", "--count"])
+            .unwrap();
+        assert!(matches!(
+            c.command,
+            Command::Prompt(prompt::PromptCommand::Show(_))
+        ));
+        assert!(Cli::try_parse_from(["harness", "prompt", "show", "--workspace", "."]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "harness",
+                "prompt",
+                "show",
+                "--session",
+                "s1",
+                "--workspace",
+                "."
+            ])
+            .is_err()
+        );
     }
 
     #[test]
