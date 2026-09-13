@@ -1,0 +1,27 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: all
+---
+==== {"pattern":"a("}
+[error]
+invalid regex: regex parse error:
+    (?:a()
+    ^
+error: unclosed group
+---
+summary: 
+metadata: null
+==== {"pattern":"a\\nb"}
+[error]
+invalid regex: the literal "\n" is not allowed in a regex
+---
+summary: 
+metadata: null
+==== {"path":"nope","pattern":"x"}
+[error]
+`nope` does not exist
+---
+summary: 
+metadata: null
+==== {"glob":"[","pattern":"x"}
+Err(InvalidInput("bad glob pattern: error parsing glob '[': unclosed character class; missing ']'"))

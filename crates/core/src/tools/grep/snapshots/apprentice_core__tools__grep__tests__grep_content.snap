@@ -1,0 +1,18 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: show(&out)
+---
+[ok]
+README.md:4:1:hello again
+crlf.txt:1:1:hello
+crlf.txt:3:1:hello world
+latin1.txt:1:6:caf� hello
+long.txt:1:1:hello xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+src/main.rs:2:15:    println!("hello");
+src/main.rs:7:14:    // TODO: hello
+web/app.ts:1:17:export function hello() {
+web/app.ts:2:11:  return 'hello';
+[9 matches in 6 files]
+---
+summary: grep "hello" → 9 matches in 6 files
+metadata: {"files":6,"matches":9,"mode":"content","overflowed":false,"searched":11,"shown":9,"truncated":false}

@@ -1,7 +1,8 @@
-//! The file tools (task M01-03) through the execution wrapper: what the
-//! trace keeps (`tool.call` blob = exact input, `tool.result` blob =
-//! the diff), the sandbox as the mentor meets it, and the seen-files
-//! set across steps.
+//! The file tools (task M01-03) and the search tool (M01-04) through
+//! the execution wrapper: what the trace keeps (`tool.call` blob =
+//! exact input, `tool.result` blob = the diff or the raw search
+//! output), the sandbox as the mentor meets it, and the seen-files set
+//! across steps.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use apprentice_api::types::TraceEvent;
 use apprentice_core::config::{Paths, ToolsConfig};
 use apprentice_core::mentor::{ContentBlock, ToolResultContent};
 use apprentice_core::tools::{
-    AllowAll, Executed, Executor, SeenFiles, ToolCall, ToolRegistry, ToolResultKind, file_tools,
+    AllowAll, Executed, Executor, SeenFiles, ToolCall, ToolRegistry, ToolResultKind, builtin_tools,
 };
 use apprentice_core::trace::{
     BlobId, NewAgent, NewSession, StepRef, TraceStore, TraceWriter, kinds,
@@ -59,7 +60,7 @@ impl Harness {
         let step = store.start_step(&agent).unwrap();
         let writer = TraceWriter::spawn(Arc::clone(&store));
         let registry = ToolRegistry::new();
-        registry.register_all(file_tools()).unwrap();
+        registry.register_all(builtin_tools()).unwrap();
         Self {
             _home: home,
             repo,
@@ -326,6 +327,40 @@ async fn paths_outside_the_workspace_are_denied_results() {
         .run("d4", "glob", json!({"pattern": "*", "path": "../.."}))
         .await;
     assert_eq!(out.kind, ToolResultKind::Denied);
+    let out = h
+        .run("d5", "grep", json!({"pattern": "fn", "path": ".."}))
+        .await;
+    assert_eq!(out.kind, ToolResultKind::Denied);
+    h.close().await;
+}
+
+#[tokio::test]
+async fn grep_leaves_its_raw_output_in_the_trace() {
+    let h = Harness::new();
+    let input = json!({"pattern": "fn (\\w+)", "context": 1});
+    let out = h.run("g1", "grep", input.clone()).await;
+    assert_eq!(out.kind, ToolResultKind::Ok, "{:?}", text_of(&out.block));
+    assert_eq!(out.summary, "grep \"fn (\\w+)\" → 2 matches in 1 file");
+    let (call, result) = h.pair("g1").await;
+    assert_eq!(h.blob(&call), serde_json::to_string(&input).unwrap());
+    assert_eq!(call.payload["risk"], "read_only");
+    let blob = h.blob(&result);
+    assert_eq!(
+        blob,
+        "src/x.rs:1:1:fn one() -> i32 {\nsrc/x.rs-2-    1\n--\nsrc/x.rs-4-\nsrc/x.rs:5:1:fn two() -> i32 {\nsrc/x.rs-6-    2\n[2 matches in 1 file]\n"
+    );
+    assert_eq!(result.payload["metadata"]["matches"], 2);
+    assert_eq!(result.payload["metadata"]["mode"], "content");
+    let (mentor, is_error) = text_of(&out.block);
+    assert!(!is_error);
+    assert_eq!(mentor, blob);
+
+    // A bad regex is an error result the mentor can read and fix.
+    let bad = h.run("g2", "grep", json!({"pattern": "fn ("})).await;
+    assert_eq!(bad.kind, ToolResultKind::Error);
+    let (_, result) = h.pair("g2").await;
+    assert_eq!(result.payload["ok"], false);
+    assert!(h.blob(&result).starts_with("invalid regex: "));
     h.close().await;
 }
 

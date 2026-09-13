@@ -37,6 +37,7 @@ pub use write::WriteFile;
 
 pub use atomic::write_atomic;
 pub use diff::{Diff, unified_diff};
+pub(crate) use glob::PathGlob;
 
 use super::{Tool, ToolContext, ToolError};
 use crate::workspace::{PathError, Workspace};

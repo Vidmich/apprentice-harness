@@ -1,0 +1,31 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: all
+---
+==== content
+[ok]
+README.md:4:1:hello again
+crlf.txt:1:1:hello
+[9 matches in 6 files]
+[limit reached; narrow the pattern or path]
+---
+summary: grep "hello" → 9 matches in 6 files
+metadata: {"files":6,"matches":9,"mode":"content","overflowed":false,"searched":11,"shown":2,"truncated":true}
+==== files
+[ok]
+README.md
+crlf.txt
+[6 files]
+[limit reached; narrow the pattern or path]
+---
+summary: grep "hello" → 6 files
+metadata: {"files":6,"matches":null,"mode":"files","overflowed":false,"searched":11,"shown":2,"truncated":true}
+==== count
+[ok]
+crlf.txt: 2
+src/main.rs: 2
+[9 matches in 6 files]
+[limit reached; narrow the pattern or path]
+---
+summary: grep "hello" → 9 matches in 6 files
+metadata: {"files":6,"matches":9,"mode":"count","overflowed":false,"searched":11,"shown":2,"truncated":true}

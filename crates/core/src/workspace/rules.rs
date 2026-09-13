@@ -152,12 +152,13 @@ impl IgnoreRules {
         self.walk_builder_from(&self.root)
     }
 
-    /// The same walker started at `dir` (under the root) and limited to
-    /// `max_depth` levels below it. The rules still match relative to
-    /// the root, and the `.gitignore` chain above `dir` applies.
-    pub fn walk_builder_at(&self, dir: &Path, max_depth: usize) -> WalkBuilder {
+    /// The same walker started at `dir` (under the root), limited to
+    /// `max_depth` levels below it when given. The rules still match
+    /// relative to the root, and the `.gitignore` chain above `dir`
+    /// applies.
+    pub fn walk_builder_at(&self, dir: &Path, max_depth: Option<usize>) -> WalkBuilder {
         let mut b = self.walk_builder_from(dir);
-        b.max_depth(Some(max_depth));
+        b.max_depth(max_depth);
         b
     }
 

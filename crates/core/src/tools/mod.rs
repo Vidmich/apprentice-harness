@@ -16,11 +16,13 @@
 //! things run one after another, results come back in the order the
 //! mentor asked.
 //!
-//! The file tools (M01-03) live in [`file`]; search, shell and git
-//! arrive in M01-04..06; the loop that drives this is M01-08.
+//! The file tools (M01-03) live in [`file`], the search tool (M01-04)
+//! in [`grep`]; shell and git arrive in M01-05..06; the loop that
+//! drives this is M01-08. [`builtin_tools`] is the lot.
 
 mod execute;
 pub mod file;
+pub mod grep;
 mod limits;
 mod registry;
 pub(crate) mod rpc;
@@ -41,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use execute::{AllowAll, Executed, Executor, Gate, ToolCall, ToolResultKind};
 pub use file::file_tools;
+pub use grep::search_tools;
 pub use limits::{OUTPUT_MEDIA_TYPE, Truncated, truncate_utf8};
 pub use registry::{RegistryError, ToolRegistry};
 pub use rpc::ToolsService;
@@ -52,6 +55,13 @@ use crate::workspace::Workspace;
 
 /// Longest `summary` line; longer ones are cut by the executor.
 pub const MAX_SUMMARY_CHARS: usize = 120;
+
+/// Every built-in tool, for [`ToolRegistry::register_all`].
+pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
+    let mut tools = file_tools();
+    tools.extend(search_tools());
+    tools
+}
 
 /// A tool the mentor (and later the apprentice) can call.
 #[async_trait]

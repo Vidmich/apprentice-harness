@@ -16,6 +16,46 @@ use crate::workspace::Workspace;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Glob;
 
+/// A compiled pattern with the tools' convention: no `/` in it means
+/// "match the file name at any depth", otherwise it matches the whole
+/// path relative to the searched directory. Shared by `glob` and
+/// `grep`'s `glob` filter.
+#[derive(Debug, Clone)]
+pub(crate) struct PathGlob {
+    matcher: globset::GlobMatcher,
+    by_name: bool,
+}
+
+impl PathGlob {
+    /// Compiles `pattern` (a leading `/` is dropped).
+    ///
+    /// # Errors
+    /// `InvalidInput` with `globset`'s message.
+    pub(crate) fn compile(pattern: &str) -> Result<Self, ToolError> {
+        let pattern = pattern.trim_start_matches('/');
+        let matcher = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .map_err(|e| ToolError::InvalidInput(format!("bad glob pattern: {e}")))?
+            .compile_matcher();
+        Ok(Self {
+            matcher,
+            by_name: !pattern.contains('/'),
+        })
+    }
+
+    /// Whether `rel` (`/`-separated, relative to the searched directory)
+    /// matches.
+    pub(crate) fn is_match(&self, rel: &str) -> bool {
+        let subject = if self.by_name {
+            rel.rsplit('/').next().unwrap_or(rel)
+        } else {
+            rel
+        };
+        self.matcher.is_match(subject)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input {
@@ -65,23 +105,12 @@ impl Tool for Glob {
     ) -> Result<ToolOutput, ToolError> {
         let Input { pattern, path } = parse::<Input>(input)?;
         let (ws, t) = target(ctx, path.as_deref().unwrap_or("."))?;
-        let matcher = GlobBuilder::new(pattern.trim_start_matches('/'))
-            .literal_separator(true)
-            .build()
-            .map_err(|e| ToolError::InvalidInput(format!("bad glob pattern: {e}")))?
-            .compile_matcher();
-        let by_name = !pattern.trim_start_matches('/').contains('/');
-        blocking(move || Ok(glob(&ws, &t, &pattern, &matcher, by_name))).await
+        let matcher = PathGlob::compile(&pattern)?;
+        blocking(move || Ok(glob(&ws, &t, &pattern, &matcher))).await
     }
 }
 
-fn glob(
-    ws: &Workspace,
-    t: &Target,
-    pattern: &str,
-    matcher: &globset::GlobMatcher,
-    by_name: bool,
-) -> ToolOutput {
+fn glob(ws: &Workspace, t: &Target, pattern: &str, matcher: &PathGlob) -> ToolOutput {
     let shown = &t.shown;
     match std::fs::metadata(&t.abs) {
         Ok(m) if m.is_dir() => {}
@@ -96,15 +125,7 @@ fn glob(
     let prefix_len = if dir.is_empty() { 0 } else { dir.len() + 1 };
     let mut found: Vec<(&str, u64)> = index
         .under(dir)
-        .filter(|e| {
-            let rel = &e.path[prefix_len..];
-            let subject = if by_name {
-                rel.rsplit('/').next().unwrap_or(rel)
-            } else {
-                rel
-            };
-            matcher.is_match(subject)
-        })
+        .filter(|e| matcher.is_match(&e.path[prefix_len..]))
         .map(|e| (e.path.as_str(), e.mtime.unwrap_or(0)))
         .collect();
     found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));

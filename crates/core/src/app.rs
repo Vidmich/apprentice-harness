@@ -110,7 +110,7 @@ impl AppState {
         let workspaces = Arc::new(Workspaces::new(Arc::clone(&store)));
         let tools = Arc::new(ToolRegistry::new());
         tools
-            .register_all(crate::tools::file_tools())
+            .register_all(crate::tools::builtin_tools())
             .expect("built-in tools register");
         Ok(Arc::new(Self {
             loader,
@@ -327,7 +327,14 @@ mod tests {
         assert_eq!(state.sessions_open().unwrap(), 0);
         assert_eq!(
             state.tools().names(),
-            ["edit_file", "glob", "list_dir", "read_file", "write_file"]
+            [
+                "edit_file",
+                "glob",
+                "grep",
+                "list_dir",
+                "read_file",
+                "write_file"
+            ]
         );
         let r = state
             .session_create(&SessionCreateParams {

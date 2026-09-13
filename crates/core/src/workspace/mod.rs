@@ -261,9 +261,9 @@ impl Workspace {
     }
 
     /// A walk of `dir` (absolute, under the root) with the same rules,
-    /// at most `max_depth` levels below it. `dir` itself is the first
-    /// entry.
-    pub fn walker_at(&self, dir: &Path, max_depth: usize) -> ignore::Walk {
+    /// at most `max_depth` levels below it when given. `dir` itself is
+    /// the first entry.
+    pub fn walker_at(&self, dir: &Path, max_depth: Option<usize>) -> ignore::Walk {
         self.ignore_rules().walk_builder_at(dir, max_depth).build()
     }
 

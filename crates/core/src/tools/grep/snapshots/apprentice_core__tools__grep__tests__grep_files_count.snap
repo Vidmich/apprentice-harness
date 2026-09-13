@@ -1,0 +1,27 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: both
+---
+[ok]
+README.md
+crlf.txt
+latin1.txt
+long.txt
+src/main.rs
+web/app.ts
+[6 files]
+---
+summary: grep "hello" → 6 files
+metadata: {"files":6,"matches":null,"mode":"files","overflowed":false,"searched":11,"shown":6,"truncated":false}
+=====
+[ok]
+crlf.txt: 2
+src/main.rs: 2
+web/app.ts: 2
+README.md: 1
+latin1.txt: 1
+long.txt: 1
+[9 matches in 6 files]
+---
+summary: grep "hello" → 9 matches in 6 files
+metadata: {"files":6,"matches":9,"mode":"count","overflowed":false,"searched":11,"shown":6,"truncated":false}

@@ -1,0 +1,63 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: spec
+---
+{
+  "name": "grep",
+  "description": "Search file contents in the workspace with a regular expression (Rust regex syntax). Ignored files (`.gitignore`, `.harness/ignore`, VCS and build directories, binaries) are skipped unless `path` names a file directly. `mode`: `content` (default) prints `path:line:col:text` for each matching line, with `context` lines before and after as `path-line-text` and `--` between groups; `files` prints one matching path per line; `count` prints `path: N` per file, most matches first. `glob` narrows the search to matching file names (`*.rs`) or paths relative to `path` (`src/**/*.ts`). `case_insensitive` ignores case. `multiline` lets a pattern span lines (`.` then also matches a newline); otherwise a pattern that could match a newline is an error. Lines longer than 400 characters are cut with `…`. Output stops at `max_results` (default 200, at most 1000) matches or files with a `[limit reached ...]` trailer: narrow the pattern, the `glob` or the `path` then. Paths are workspace-relative; results are sorted by path, then line.",
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "case_insensitive": {
+        "description": "Ignore case. Default false.",
+        "type": "boolean"
+      },
+      "context": {
+        "description": "Lines of context before and after each match (`content` mode, 0–10). Default 0.",
+        "maximum": 10,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "glob": {
+        "description": "Only search files matching this glob, e.g. `*.rs`, `src/**/*.ts`.",
+        "type": "string"
+      },
+      "max_results": {
+        "description": "Stop after this many matching lines (`content`) or files (`files`, `count`). Default 200, at most 1000.",
+        "maximum": 1000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "mode": {
+        "description": "What to print: matching lines (`content`, default), matching paths (`files`), or matches per file (`count`).",
+        "enum": [
+          "content",
+          "files",
+          "count"
+        ],
+        "type": "string"
+      },
+      "multiline": {
+        "description": "Let the pattern span lines; `.` matches newlines too. Default false.",
+        "type": "boolean"
+      },
+      "path": {
+        "description": "Directory or file to search, relative to the workspace root. Default: the root.",
+        "type": "string"
+      },
+      "pattern": {
+        "description": "The regular expression, e.g. `fn \\w+\\(`, `TODO|FIXME`, `^use std::`.",
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "pattern"
+    ],
+    "type": "object"
+  },
+  "risk": "read_only",
+  "tags": [
+    "search"
+  ]
+}

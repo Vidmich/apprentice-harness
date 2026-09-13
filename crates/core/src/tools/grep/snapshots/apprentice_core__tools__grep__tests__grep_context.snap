@@ -1,0 +1,24 @@
+---
+source: crates/core/src/tools/grep/tests.rs
+expression: show(&out)
+---
+[ok]
+src/lib.rs:1:5:pub fn add(a: i32, b: i32) -> i32 {
+src/lib.rs-2-    a + b
+--
+src/lib.rs-4-
+src/lib.rs:5:5:pub fn sub(a: i32, b: i32) -> i32 {
+src/lib.rs-6-    a - b
+--
+src/main.rs:1:1:fn main() {
+src/main.rs-2-    println!("hello");
+--
+src/main.rs-5-
+src/main.rs:6:1:fn helper() {
+src/main.rs-7-    // TODO: hello
+--
+src/util/x.rs:1:5:pub fn x() {}
+[5 matches in 3 files]
+---
+summary: grep "fn " → 5 matches in 3 files
+metadata: {"files":3,"matches":5,"mode":"content","overflowed":false,"searched":3,"shown":5,"truncated":false}

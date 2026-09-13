@@ -90,7 +90,7 @@ fn list(
     }
     let mut out = String::new();
     let mut total = 0usize;
-    for (i, entry) in ws.walker_at(&t.abs, depth).enumerate() {
+    for (i, entry) in ws.walker_at(&t.abs, Some(depth)).enumerate() {
         if i % 256 == 0 && cancel.is_cancelled() {
             return Err(ToolError::Cancelled);
         }
