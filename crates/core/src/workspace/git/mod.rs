@@ -1,8 +1,18 @@
-//! `HEAD` of the repository at the root, read from `.git` directly (no
-//! git binary, no libgit2): enough for `workspace.info` and the
-//! `workspace.snapshot` event.
+//! Git for the workspace (tasks M01-02, M01-06).
+//!
+//! [`git_head`] reads `HEAD` from `.git` directly (no git binary, no
+//! libgit2): enough for `workspace.info`. Everything else shells out
+//! through [`Repo`] (`git -C <root> ...` with `GIT_OPTIONAL_LOCKS=0`,
+//! `LC_ALL=C`, a 30 s timeout): the porcelain [`Status`] parser serves
+//! the `git_status` tool and the workspace snapshot alike.
+
+mod run;
+mod status;
 
 use std::path::{Path, PathBuf};
+
+pub use run::{GIT_TIMEOUT, GitError, GitOutput, Repo};
+pub use status::{Entry, Status, parse_status};
 
 /// Where the repository's `HEAD` points.
 #[derive(Debug, Clone, PartialEq, Eq)]

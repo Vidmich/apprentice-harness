@@ -22,7 +22,7 @@ const PENDING_MAX: usize = 8;
 /// budget) and the tail survive, the middle is counted. Feeding it is
 /// O(bytes); nothing is copied twice.
 #[derive(Debug)]
-pub(super) struct Capture {
+pub(crate) struct Capture {
     head_budget: usize,
     tail_budget: usize,
     head: Vec<u8>,

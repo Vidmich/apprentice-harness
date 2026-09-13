@@ -17,12 +17,13 @@
 //! mentor asked.
 //!
 //! The file tools (M01-03) live in [`file`], the search tool (M01-04)
-//! in [`grep`], the shell tools (M01-05) in [`shell`]; git arrives in
-//! M01-06; the loop that drives this is M01-08. [`builtin_tools`] is
-//! the lot.
+//! in [`grep`], the shell tools (M01-05) in [`shell`], the git tools
+//! (M01-06) in [`git`]; the loop that drives this is M01-08.
+//! [`builtin_tools`] is the lot.
 
 mod execute;
 pub mod file;
+pub mod git;
 pub mod grep;
 mod limits;
 mod registry;
@@ -45,6 +46,7 @@ use tokio_util::sync::CancellationToken;
 
 pub use execute::{AllowAll, Executed, Executor, Gate, ToolCall, ToolResultKind};
 pub use file::file_tools;
+pub use git::git_tools;
 pub use grep::search_tools;
 pub use limits::{OUTPUT_MEDIA_TYPE, Truncated, truncate_utf8};
 pub use registry::{RegistryError, ToolRegistry};
@@ -64,6 +66,7 @@ pub fn builtin_tools() -> Vec<Arc<dyn Tool>> {
     let mut tools = file_tools();
     tools.extend(search_tools());
     tools.extend(shell_tools());
+    tools.extend(git_tools());
     tools
 }
 

@@ -1,0 +1,85 @@
+---
+source: crates/core/src/tools/git/tests.rs
+expression: specs
+---
+[
+  {
+    "name": "git_status",
+    "description": "Show the state of the workspace's git repository: the branch (with its upstream and how far ahead/behind), then the changed paths grouped as `staged:`, `unstaged:`, `unmerged:` and `untracked:` with git's one-letter status (`M` modified, `A` added, `D` deleted, `R old -> new` renamed, `T` type change, `UU` both modified). A clean tree prints `nothing to commit, working tree clean`. Paths are relative to the workspace root; changes elsewhere in the repository are counted, not listed. Read-only; use `shell` for git commands that change anything.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "git"
+    ]
+  },
+  {
+    "name": "git_diff",
+    "description": "Show uncommitted changes in the workspace as a unified diff (`git diff --no-color`). By default: the working tree against the index (unstaged changes); `staged: true` shows the index against `HEAD` (what a commit would contain); `base` compares against that ref instead (`HEAD`, `main`, `HEAD~3`, a hash) — with `staged` the index, otherwise the working tree. `path` restricts the diff to a file or directory (workspace-relative). Output stops at `max_bytes` (default 64 KiB, at most 2 MiB), cut between hunks with `[diff truncated for <path>]` and `[diff omitted for <path>]` lines: ask for a `path` then. `[no changes]` when nothing differs. Read-only.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "description": "Compare against this ref (`HEAD`, `main`, `HEAD~2`, a hash) instead of the index.",
+          "minLength": 1,
+          "pattern": "^[^-\\s][^\\s]*$",
+          "type": "string"
+        },
+        "max_bytes": {
+          "description": "Output budget in bytes. Default 65536, at most 2097152.",
+          "maximum": 2097152,
+          "minimum": 1024,
+          "type": "integer"
+        },
+        "path": {
+          "description": "File or directory to diff, relative to the workspace root. Default: everything.",
+          "type": "string"
+        },
+        "staged": {
+          "description": "Diff the index (staged changes) instead of the working tree. Default false.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "git"
+    ]
+  },
+  {
+    "name": "git_log",
+    "description": "Show recent commits of the workspace's repository, newest first, as `<short hash> <date> <author> <subject>` per line (`format: oneline`, default) or with the whole commit message indented under that line (`format: full`). `path` limits the history to commits touching a file or directory (workspace-relative). At most `max_count` commits (default 20, at most 200); a `[more commits ...]` trailer says when the history goes on. Read-only.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "`oneline` (default): hash, date, author and subject; `full`: the whole message too.",
+          "enum": [
+            "oneline",
+            "full"
+          ],
+          "type": "string"
+        },
+        "max_count": {
+          "description": "How many commits at most. Default 20, at most 200.",
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "description": "Only commits touching this file or directory, relative to the workspace root.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "risk": "read_only",
+    "tags": [
+      "git"
+    ]
+  }
+]

@@ -329,6 +329,9 @@ mod tests {
             state.tools().names(),
             [
                 "edit_file",
+                "git_diff",
+                "git_log",
+                "git_status",
                 "glob",
                 "grep",
                 "list_dir",

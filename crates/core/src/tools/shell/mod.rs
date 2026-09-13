@@ -19,7 +19,7 @@
 //! Never `cmd.exe`: its quoting is unreliable, and the mentor writes
 //! POSIX-ish commands more consistently for PowerShell 7.
 
-mod capture;
+pub(crate) mod capture;
 mod jobs;
 mod process;
 mod program;

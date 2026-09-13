@@ -8,6 +8,9 @@
 //! registry: rows in `traces.sqlite` (schema v2) plus the open
 //! `Workspace` per id, so the index is shared by every session on the
 //! same root. [`WorkspaceService`] exposes `workspace.*` over RPC.
+//! [`Workspace::snapshot`] (M01-06) records what the tree looks like at
+//! an agent's start and end; [`git`] runs the git binary for it and for
+//! the git tools.
 //!
 //! The rules in one place:
 //! - every path a tool touches goes through `resolve`; what lands
@@ -16,12 +19,13 @@
 //! - ignore rules are for discovery only, never access control;
 //! - paths shown to the mentor are root-relative with `/` on every OS.
 
-mod git;
+pub mod git;
 mod index;
 mod manager;
 mod paths;
 pub(crate) mod rpc;
 mod rules;
+mod snapshot;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -32,6 +36,10 @@ pub use manager::Workspaces;
 pub use paths::PathError;
 pub use rpc::WorkspaceService;
 pub use rules::{BUILTIN_IGNORES, IgnoreRules};
+pub use snapshot::{
+    DIFF_MEDIA_TYPE, FilesChanged, GitSnapshot, SNAPSHOT_DIFF_MAX, SNAPSHOT_LIST_MAX, Snapshot,
+    SnapshotPhase,
+};
 
 use crate::trace::{TraceError, WorkspaceId, WorkspaceRecord};
 

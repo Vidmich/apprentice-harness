@@ -26,6 +26,9 @@ pub struct FileEntry {
     pub size: u64,
     /// Seconds since the Unix epoch, when the filesystem reports one.
     pub mtime: Option<u64>,
+    /// The same at the filesystem's full resolution (nanoseconds), for
+    /// change detection between snapshots.
+    pub mtime_ns: Option<u128>,
     /// Language by extension or well-known file name.
     pub language: Option<&'static str>,
 }
@@ -74,11 +77,12 @@ impl FileIndex {
                 let path = rel.to_string_lossy().replace('\\', "/");
                 let meta = entry.metadata().ok();
                 let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
-                let mtime = meta
+                let modified = meta
                     .as_ref()
                     .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs());
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
+                let mtime = modified.map(|d| d.as_secs());
+                let mtime_ns = modified.map(|d| d.as_nanos());
                 let language = language_of(rel);
                 let mut files = files
                     .lock()
@@ -91,6 +95,7 @@ impl FileIndex {
                     path,
                     size,
                     mtime,
+                    mtime_ns,
                     language,
                 });
                 WalkState::Continue
@@ -280,6 +285,7 @@ mod tests {
         assert_eq!(main.size, 12);
         assert_eq!(main.language, Some("rust"));
         assert!(main.mtime.is_some());
+        assert!(main.mtime_ns.is_some());
         assert!(index.get("target/out.o").is_none());
         let under: Vec<&str> = index.under("src").map(|e| e.path.as_str()).collect();
         assert_eq!(under, ["src/deep/x.py", "src/main.rs"]);
